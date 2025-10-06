@@ -2,32 +2,29 @@ blueprint:
   name: Heating Control - Window/Door Open Detection
   source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control.yaml
   description: >
-    **Automated heating control with window/door sensors.** 
-    Turns down or turns off heating when a window or door is left open, and restores heating when closed.
-    - Supports up to 6 sensors (separate lists for windows and doors).
-    - Window openings trigger immediate heating adjustment.
-    - Door openings trigger heating adjustment after 4 minutes open (ignoring brief opens).
-    - Configurable modes for when open vs. closed (choose from Comfort, Comfort-1, Comfort-2, Eco, Off).
+    Automated heating control with window/door sensors.
+    - Up to 6 sensors per room (separate lists for windows and doors).
+    - Windows: immediate action; Doors: action after 4 minutes open.
+    - Configurable modes when open/closed (comfort, comfort-1, comfort-2, eco, off).
   domain: automation
+
   input:
     climate_entity:
       name: Climate Entity (Heater)
-      description: The climate device controlling the heater in this room (e.g., thermostat or pilot-wire module).
       selector:
         entity:
           domain: climate
 
     window_sensors:
       name: Window Sensors
-      description: Window contact sensors for this room (heating off as soon as window opens).
       selector:
         entity:
           domain: binary_sensor
           device_class: window
           multiple: true
+
     door_sensors:
       name: Door Sensors
-      description: Door contact sensors for this room (4 min delay before heating off).
       selector:
         entity:
           domain: binary_sensor
@@ -36,53 +33,43 @@ blueprint:
 
     mode_when_open:
       name: Mode When Open
-      description: Climate mode/preset to set when a window/door is open (e.g. Eco or Off to save energy).
       selector:
         select:
-          options:
-            - comfort
-            - comfort-1
-            - comfort-2
-            - eco
-            - off
+          options: [comfort, comfort-1, comfort-2, eco, off]
       default: off
 
     mode_when_closed:
       name: Mode When Closed
-      description: Climate mode/preset to set when all windows/doors are closed (e.g. Comfort mode to resume normal heating).
       selector:
         select:
-          options:
-            - comfort
-            - comfort-1
-            - comfort-2
-            - eco
-            - off
+          options: [comfort, comfort-1, comfort-2, eco, off]
       default: comfort
 
-# Variables for internal use
+# Variables
 variables:
   climate: !input climate_entity
   open_mode: !input mode_when_open
   closed_mode: !input mode_when_closed
   windows: !input window_sensors
   doors: !input door_sensors
+  all_sensors: >
+    {{ (windows | default([])) + (doors | default([])) }}
 
 trigger:
-  # Window opened -> immediate trigger
+  # Window opened -> immediate
   - platform: state
     entity_id: !input window_sensors
     to: 'on'
     id: window_opened
 
-  # Door opened -> trigger after 4 minutes open
+  # Door opened -> after 4 minutes
   - platform: state
     entity_id: !input door_sensors
     to: 'on'
     for: '00:04:00'
     id: door_opened
 
-  # Any sensor closed -> trigger to potentially restore (we will check all closed in conditions)
+  # Any sensor closed
   - platform: state
     entity_id: !input window_sensors
     to: 'off'
@@ -93,64 +80,60 @@ trigger:
     id: sensor_closed
 
 condition:
-  # For restore triggers, ensure all sensors are closed (no window or door is currently 'on')
+  # Open triggers always pass; on close triggers, ensure ALL sensors are closed
   - condition: or
     conditions:
-      # If trigger was an "open" event, no condition needed (always proceed on open triggers)
       - condition: template
-        value_template: "{{ trigger.id in ['window_opened', 'door_opened'] }}"
-      # If trigger was a "sensor_closed", then check that absolutely none of the sensors are open now
+        value_template: "{{ trigger.id in ['window_opened','door_opened'] }}"
       - condition: template
         value_template: >
-          {{ trigger.id == 'sensor_closed' and
-             (expand(states|selectattr('entity_id','in', windows + doors)) 
-               | selectattr('state','eq','on') | list | length == 0) }}
+          {{ trigger.id == 'sensor_closed'
+             and (expand(all_sensors) | selectattr('state','eq','on') | list | length == 0) }}
+
 action:
-  # We use choose to handle open vs closed actions separately
   - choose:
-      # Case 1: A window or door open trigger (after delay) -> turn heating to open_mode
+      # == OPEN CASE ==
       - conditions:
           - condition: template
             value_template: "{{ trigger.id in ['window_opened','door_opened'] }}"
         sequence:
           - choose:
-              # If open_mode is 'off', turn off the climate (HVAC off)
-              - conditions: "{{ open_mode == 'off' }}"
+              - conditions:
+                  - condition: template
+                    value_template: "{{ open_mode == 'off' }}"
                 sequence:
                   - service: climate.turn_off
                     target:
-                      entity_id: "{{ climate }}"
-              # Otherwise, set the preset mode to the specified open_mode
-              - conditions: "{{ open_mode != 'off' }}"
-                sequence:
-                  - service: climate.set_preset_mode
-                    target:
-                      entity_id: "{{ climate }}"
-                    data:
-                      preset_mode: "{{ open_mode }}"
-      # Case 2: All sensors closed -> restore heating to closed_mode
+                      entity_id: !input climate_entity
+            default:
+              - service: climate.set_preset_mode
+                target:
+                  entity_id: !input climate_entity
+                data:
+                  preset_mode: "{{ open_mode }}"
+
+      # == ALL CLOSED CASE ==
       - conditions:
           - condition: template
             value_template: "{{ trigger.id == 'sensor_closed' }}"
         sequence:
           - choose:
-              # If closed_mode is 'off', ensure climate is off
-              - conditions: "{{ closed_mode == 'off' }}"
+              - conditions:
+                  - condition: template
+                    value_template: "{{ closed_mode == 'off' }}"
                 sequence:
                   - service: climate.turn_off
                     target:
-                      entity_id: "{{ climate }}"
-              # Otherwise, turn on the climate (if it was off) and set preset to closed_mode
-              - conditions: "{{ closed_mode != 'off' }}"
-                sequence:
-                  # Turn on heating (if off) – this sets HVAC mode to heat/auto as appropriate
-                  - service: climate.turn_on
-                    target:
-                      entity_id: "{{ climate }}"
-                  # Set the preset mode to the desired closed mode
-                  - service: climate.set_preset_mode
-                    target:
-                      entity_id: "{{ climate }}"
-                    data:
-                      preset_mode: "{{ closed_mode }}"
-  mode: single
+                      entity_id: !input climate_entity
+            default:
+              - service: climate.turn_on
+                target:
+                  entity_id: !input climate_entity
+              - service: climate.set_preset_mode
+                target:
+                  entity_id: !input climate_entity
+                data:
+                  preset_mode: "{{ closed_mode }}"
+    default: []
+mode: single
+
