@@ -6,6 +6,7 @@ blueprint:
     - Up to 6 sensors per room (separate lists for windows and doors).
     - Windows: immediate action; Doors: action after 4 minutes open.
     - Configurable modes when open/closed (comfort, comfort-1, comfort-2, eco, off).
+    - Bypass switch (input_boolean) to disable logic per room.
   domain: automation
 
   input:
@@ -17,6 +18,7 @@ blueprint:
 
     window_sensors:
       name: Window Sensors
+      description: Select up to 6 window sensors for this room.
       selector:
         entity:
           domain: binary_sensor
@@ -25,6 +27,7 @@ blueprint:
 
     door_sensors:
       name: Door Sensors
+      description: Select up to 6 door sensors for this room (4 min delay before action).
       selector:
         entity:
           domain: binary_sensor
@@ -33,54 +36,79 @@ blueprint:
 
     mode_when_open:
       name: Mode When Open
+      description: Climate preset when any window is open (immediate) or any door is open for 4 min.
       selector:
         select:
-          options: [comfort, comfort-1, comfort-2, eco, off]
-      default: off
+          options:
+            - "comfort"
+            - "comfort-1"
+            - "comfort-2"
+            - "eco"
+            - "off"
+      default: "off"
 
     mode_when_closed:
       name: Mode When Closed
+      description: Climate preset when ALL sensors are closed (restore mode).
       selector:
         select:
-          options: [comfort, comfort-1, comfort-2, eco, off]
-      default: comfort
+          options:
+            - "comfort"
+            - "comfort-1"
+            - "comfort-2"
+            - "eco"
+            - "off"
+      default: "comfort"
 
-# Variables
+    bypass_switch:
+      name: Bypass switch (input_boolean)
+      description: When ON, disables this automation (maintenance / battery issue / manual override).
+      selector:
+        entity:
+          domain: input_boolean
+
+# ===== Variables =====
 variables:
   climate: !input climate_entity
   open_mode: !input mode_when_open
   closed_mode: !input mode_when_closed
   windows: !input window_sensors
   doors: !input door_sensors
+  bypass: !input bypass_switch
   all_sensors: >
     {{ (windows | default([])) + (doors | default([])) }}
 
+# ===== Triggers =====
 trigger:
   # Window opened -> immediate
   - platform: state
     entity_id: !input window_sensors
-    to: 'on'
+    to: "on"
     id: window_opened
 
-  # Door opened -> after 4 minutes
+  # Door opened -> after 4 minutes open
   - platform: state
     entity_id: !input door_sensors
-    to: 'on'
-    for: '00:04:00'
+    to: "on"
+    for: "00:04:00"
     id: door_opened
 
-  # Any sensor closed
+  # Any sensor closed -> potential restore (we check ALL closed in conditions)
   - platform: state
     entity_id: !input window_sensors
-    to: 'off'
+    to: "off"
     id: sensor_closed
   - platform: state
     entity_id: !input door_sensors
-    to: 'off'
+    to: "off"
     id: sensor_closed
 
+# ===== Conditions =====
 condition:
-  # Open triggers always pass; on close triggers, ensure ALL sensors are closed
+  # Bypass must be OFF
+  - condition: template
+    value_template: "{{ is_state(bypass, 'off') }}"
+  # If open-trigger -> always proceed; if close-trigger -> ensure ALL sensors are closed
   - condition: or
     conditions:
       - condition: template
@@ -90,9 +118,10 @@ condition:
           {{ trigger.id == 'sensor_closed'
              and (expand(all_sensors) | selectattr('state','eq','on') | list | length == 0) }}
 
+# ===== Actions =====
 action:
   - choose:
-      # == OPEN CASE ==
+      # === OPEN CASE ===
       - conditions:
           - condition: template
             value_template: "{{ trigger.id in ['window_opened','door_opened'] }}"
@@ -112,7 +141,7 @@ action:
                 data:
                   preset_mode: "{{ open_mode }}"
 
-      # == ALL CLOSED CASE ==
+      # === ALL CLOSED CASE ===
       - conditions:
           - condition: template
             value_template: "{{ trigger.id == 'sensor_closed' }}"
@@ -135,5 +164,5 @@ action:
                 data:
                   preset_mode: "{{ closed_mode }}"
     default: []
-mode: single
 
+mode: single
