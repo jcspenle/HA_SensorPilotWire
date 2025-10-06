@@ -5,7 +5,7 @@ blueprint:
     Automated heating control with window/door sensors.
     - Windows: immediate action; Doors: action after a configurable delay (default 4 minutes).
     - Configurable modes when open/closed (comfort, comfort-1, comfort-2, eco, off).
-    - Automation status selector (Activated / Bypass) + helper bypass switch.
+    - Automation status selector (Activated / Bypass).
     - Window sensors required; door sensors optional.
   domain: automation
 
@@ -17,13 +17,6 @@ blueprint:
         select:
           options: ["Activated","Bypass"]
       default: "Activated"
-
-    bypass_switch:
-      name: Bypass switch (input_boolean)
-      description: When ON, disables this automation (maintenance / battery issue / manual override).
-      selector:
-        entity:
-          domain: input_boolean
 
     climate_entity:
       name: Climate Entity (Heater)
@@ -55,7 +48,10 @@ blueprint:
       description: Minimum continuous open time before action for DOOR sensors.
       selector:
         duration: {}
-      default: "00:04:00"
+      default:
+        hours: 0
+        minutes: 4
+        seconds: 0
 
     mode_when_open:
       name: Mode When Open
@@ -72,6 +68,13 @@ blueprint:
         select:
           options: ["comfort","comfort-1","comfort-2","eco","off"]
       default: "comfort"
+
+    bypass_switch:
+      name: Bypass switch (input_boolean) — optional
+      description: When ON, disables this automation (maintenance / battery issue / manual override). Leave empty if not used.
+      selector:
+        entity:
+          domain: input_boolean
 
 # ===== Variables =====
 variables:
@@ -115,9 +118,9 @@ condition:
   # Must be activated via status
   - condition: template
     value_template: "{{ status == 'Activated' }}"
-  # Bypass helper must be OFF
+  # Bypass helper must be OFF OR not set
   - condition: template
-    value_template: "{{ is_state(bypass, 'off') }}"
+    value_template: "{{ (bypass | default('')) == '' or is_state(bypass, 'off') }}"
   # Require at least one window sensor selected
   - condition: template
     value_template: "{{ (windows | default([])) | length > 0 }}"
