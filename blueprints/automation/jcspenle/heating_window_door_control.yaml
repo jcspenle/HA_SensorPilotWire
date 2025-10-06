@@ -3,13 +3,21 @@ blueprint:
   source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control.yaml
   description: >
     Automated heating control with window/door sensors.
-    - Up to 6 sensors per room (separate lists for windows and doors).
     - Windows: immediate action; Doors: action after 4 minutes open.
     - Configurable modes when open/closed (comfort, comfort-1, comfort-2, eco, off).
-    - Bypass switch (input_boolean) to disable logic per room.
+    - Automation status selector (Activated / Bypass).
+    - Window sensors required; door sensors optional.
   domain: automation
 
   input:
+    automation_status:
+      name: Automation status
+      description: Choose 'Activated' to enable logic or 'Bypass' to disable it.
+      selector:
+        select:
+          options: ["Activated","Bypass"]
+      default: "Activated"
+
     climate_entity:
       name: Climate Entity (Heater)
       selector:
@@ -17,8 +25,8 @@ blueprint:
           domain: climate
 
     window_sensors:
-      name: Window Sensors
-      description: Select up to 6 window sensors for this room.
+      name: Window Sensors (required)
+      description: Select one or more window sensors for this room.
       selector:
         entity:
           domain: binary_sensor
@@ -26,25 +34,21 @@ blueprint:
           multiple: true
 
     door_sensors:
-      name: Door Sensors
-      description: Select up to 6 door sensors for this room (4 min delay before action).
+      name: Door Sensors (optional)
+      description: Select door sensors for this room (4 min delay before action). Leave empty if none.
       selector:
         entity:
           domain: binary_sensor
           device_class: door
           multiple: true
+      default: []
 
     mode_when_open:
       name: Mode When Open
       description: Climate preset when any window is open (immediate) or any door is open for 4 min.
       selector:
         select:
-          options:
-            - "comfort"
-            - "comfort-1"
-            - "comfort-2"
-            - "eco"
-            - "off"
+          options: ["comfort","comfort-1","comfort-2","eco","off"]
       default: "off"
 
     mode_when_closed:
@@ -52,70 +56,60 @@ blueprint:
       description: Climate preset when ALL sensors are closed (restore mode).
       selector:
         select:
-          options:
-            - "comfort"
-            - "comfort-1"
-            - "comfort-2"
-            - "eco"
-            - "off"
+          options: ["comfort","comfort-1","comfort-2","eco","off"]
       default: "comfort"
-
-    bypass_switch:
-      name: Bypass switch (input_boolean)
-      description: When ON, disables this automation (maintenance / battery issue / manual override).
-      selector:
-        entity:
-          domain: input_boolean
 
 # ===== Variables =====
 variables:
+  status: !input automation_status
   climate: !input climate_entity
   open_mode: !input mode_when_open
   closed_mode: !input mode_when_closed
   windows: !input window_sensors
   doors: !input door_sensors
-  bypass: !input bypass_switch
   all_sensors: >
     {{ (windows | default([])) + (doors | default([])) }}
 
 # ===== Triggers =====
 trigger:
-  # Window opened -> immediate
+  # Any window opened (immediate)
   - platform: state
     entity_id: !input window_sensors
     to: "on"
-    id: window_opened
+    id: opened
 
-  # Door opened -> after 4 minutes open
+  # Any door opened (no 'for' here; delay handled in actions; list may be empty)
   - platform: state
     entity_id: !input door_sensors
     to: "on"
-    for: "00:04:00"
-    id: door_opened
+    id: opened
 
-  # Any sensor closed -> potential restore (we check ALL closed in conditions)
+  # Any sensor closed
   - platform: state
     entity_id: !input window_sensors
     to: "off"
-    id: sensor_closed
+    id: closed
   - platform: state
     entity_id: !input door_sensors
     to: "off"
-    id: sensor_closed
+    id: closed
 
 # ===== Conditions =====
 condition:
-  # Bypass must be OFF
+  # Must be activated
   - condition: template
-    value_template: "{{ is_state(bypass, 'off') }}"
-  # If open-trigger -> always proceed; if close-trigger -> ensure ALL sensors are closed
+    value_template: "{{ status == 'Activated' }}"
+  # Require at least one window sensor selected
+  - condition: template
+    value_template: "{{ (windows | default([])) | length > 0 }}"
+  # Open triggers always pass; on close triggers, ensure ALL sensors are closed
   - condition: or
     conditions:
       - condition: template
-        value_template: "{{ trigger.id in ['window_opened','door_opened'] }}"
+        value_template: "{{ trigger.id == 'opened' }}"
       - condition: template
         value_template: >
-          {{ trigger.id == 'sensor_closed'
+          {{ trigger.id == 'closed'
              and (expand(all_sensors) | selectattr('state','eq','on') | list | length == 0) }}
 
 # ===== Actions =====
@@ -124,8 +118,19 @@ action:
       # === OPEN CASE ===
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id in ['window_opened','door_opened'] }}"
+            value_template: "{{ trigger.id == 'opened' }}"
         sequence:
+          # If it's a DOOR (in the 'doors' list), wait 4 minutes and ensure still open
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ trigger.entity_id in doors }}"
+                sequence:
+                  - delay: "00:04:00"
+                  - condition: template
+                    value_template: "{{ is_state(trigger.entity_id, 'on') }}"
+            default: []
+          # Apply OPEN mode
           - choose:
               - conditions:
                   - condition: template
@@ -144,7 +149,7 @@ action:
       # === ALL CLOSED CASE ===
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'sensor_closed' }}"
+            value_template: "{{ trigger.id == 'closed' }}"
         sequence:
           - choose:
               - conditions:
