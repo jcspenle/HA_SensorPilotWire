@@ -9,7 +9,7 @@ blueprint:
     - Window sensors required; door sensors optional.
     - Support for inverted sensor logic (on=closed / off=open).
     - Notifications in French when heating state changes.
-    - Activity logging with room/entity names.
+    - Activity logging with room names.
     - Smart mode: restores previous preset when closing.
     - Dashboard sensors for windows and doors status.
   domain: automation
@@ -106,18 +106,16 @@ blueprint:
         text: {}
       default: "Pièce"
 
-    notify_device:
-      name: Appareil de notification
-      description: Choisir l'appareil pour recevoir les notifications (optionnel).
+    notify_service:
+      name: Service de notification (optionnel)
+      description: Service notify à utiliser (ex. "notify.mobile_app_iphone", "notify.all_devices"). Laisser vide pour désactiver.
       selector:
-        device:
-          integration: mobile_app
-          multiple: false
+        text: {}
       default: ""
 
     log_entity:
       name: Entité de log (optionnel)
-      description: input_text pour logger l'activité (créer un helper input_text si besoin).
+      description: input_text pour logger l'activité (créer un helper input_text si besoin). Laisser vide pour désactiver.
       selector:
         entity:
           domain: input_text
@@ -125,7 +123,7 @@ blueprint:
 
     window_status_sensor:
       name: Capteur d'état fenêtres (optionnel)
-      description: input_text pour afficher l'état des fenêtres dans le dashboard.
+      description: input_text pour afficher l'état des fenêtres dans le dashboard. Laisser vide pour désactiver.
       selector:
         entity:
           domain: input_text
@@ -133,7 +131,7 @@ blueprint:
 
     door_status_sensor:
       name: Capteur d'état portes (optionnel)
-      description: input_text pour afficher l'état des portes dans le dashboard.
+      description: input_text pour afficher l'état des portes dans le dashboard. Laisser vide pour désactiver.
       selector:
         entity:
           domain: input_text
@@ -152,7 +150,7 @@ variables:
   logic: !input sensor_logic
   smart_mode: !input smart_restore
   room: !input room_name
-  notify_dev: !input notify_device
+  notify_svc: !input notify_service
   log_ent: !input log_entity
   window_sensor: !input window_status_sensor
   door_sensor: !input door_status_sensor
@@ -222,21 +220,10 @@ action:
                     then:
                       - service: input_text.set_value
                         target:
-                          entity_id: !input window_status_sensor
+                          entity_id: "{{ window_sensor }}"
                         data:
                           value: >
                             {{ expand(windows) | selectattr('state','eq', state_open) | list | length }} fenêtre(s) ouverte(s)
-                  
-                  # Save current preset if smart mode
-                  - if:
-                      - condition: template
-                        value_template: "{{ smart_mode and current_preset != none }}"
-                    then:
-                      - service: input_text.set_value
-                        target:
-                          entity_id: !input log_entity
-                        data:
-                          value: "{{ room }}: Mode {{ current_preset }} mémorisé"
                   
                   # Apply OPEN mode immediately
                   - choose:
@@ -261,7 +248,7 @@ action:
                     then:
                       - service: input_text.set_value
                         target:
-                          entity_id: !input log_entity
+                          entity_id: "{{ log_ent }}"
                         data:
                           value: >
                             {{ now().strftime('%H:%M') }} - {{ room }}: Fenêtre ouverte - Chauffage {{ 'ÉTEINT' if open_mode == 'off' else 'mode ' + open_mode }}
@@ -269,26 +256,26 @@ action:
                   # Send notification
                   - if:
                       - condition: template
-                        value_template: "{{ notify_dev != '' }}"
+                        value_template: "{{ notify_svc != '' }}"
                     then:
-                      - device_id: !input notify_device
-                        domain: mobile_app
-                        type: notify
-                        message: >
-                          🪟 {{ room }}: Fenêtre ouverte - Chauffage {{ 'éteint' if open_mode == 'off' else 'réduit (' + open_mode + ')' }}
-                        title: "Chauffage désactivé"
+                      - service: "{{ notify_svc }}"
+                        data:
+                          message: >
+                            🪟 {{ room }}: Fenêtre ouverte - Chauffage {{ 'éteint' if open_mode == 'off' else 'réduit (' + open_mode + ')' }}
+                          title: "Chauffage désactivé"
 
               # WINDOW CLOSED - check if ALL sensors are closed
               - conditions:
                   - condition: template
                     value_template: "{{ trigger.to_state.state == state_closed }}"
+                sequence:
                   # Wait minimum closed duration (anti-bounce)
                   - delay: !input min_closed_duration
                   # Verify ALL sensors are now closed
                   - condition: template
                     value_template: >
                       {{ expand(all_sensors) | selectattr('state','eq', state_open) | list | length == 0 }}
-                sequence:
+                  
                   # Update window status sensor
                   - if:
                       - condition: template
@@ -296,7 +283,7 @@ action:
                     then:
                       - service: input_text.set_value
                         target:
-                          entity_id: !input window_status_sensor
+                          entity_id: "{{ window_sensor }}"
                         data:
                           value: "Toutes les fenêtres fermées"
                   
@@ -335,7 +322,7 @@ action:
                     then:
                       - service: input_text.set_value
                         target:
-                          entity_id: !input log_entity
+                          entity_id: "{{ log_ent }}"
                         data:
                           value: >
                             {{ now().strftime('%H:%M') }} - {{ room }}: Tout fermé - Chauffage {{ 'ALLUMÉ' if restore_mode != 'off' else 'ÉTEINT' }} ({{ restore_mode }})
@@ -343,14 +330,13 @@ action:
                   # Send notification
                   - if:
                       - condition: template
-                        value_template: "{{ notify_dev != '' }}"
+                        value_template: "{{ notify_svc != '' }}"
                     then:
-                      - device_id: !input notify_device
-                        domain: mobile_app
-                        type: notify
-                        message: >
-                          ✅ {{ room }}: Tout fermé - Chauffage {{ 'rallumé' if restore_mode != 'off' else 'éteint' }} ({{ restore_mode }})
-                        title: "Chauffage restauré"
+                      - service: "{{ notify_svc }}"
+                        data:
+                          message: >
+                            ✅ {{ room }}: Tout fermé - Chauffage {{ 'rallumé' if restore_mode != 'off' else 'éteint' }} ({{ restore_mode }})
+                          title: "Chauffage restauré"
 
       # === DOOR OPENED (with delay) ===
       - conditions:
@@ -371,7 +357,7 @@ action:
             then:
               - service: input_text.set_value
                 target:
-                  entity_id: !input door_status_sensor
+                  entity_id: "{{ door_sensor }}"
                 data:
                   value: >
                     {{ expand(doors) | selectattr('state','eq', state_open) | list | length }} porte(s) ouverte(s)
@@ -399,34 +385,34 @@ action:
             then:
               - service: input_text.set_value
                 target:
-                  entity_id: !input log_entity
+                  entity_id: "{{ log_ent }}"
                 data:
                   value: >
-                    {{ now().strftime('%H:%M') }} - {{ room }}: Porte ouverte (>{{ (door_delay.minutes | int) }}min) - Chauffage {{ 'ÉTEINT' if open_mode == 'off' else 'mode ' + open_mode }}
+                    {{ now().strftime('%H:%M') }} - {{ room }}: Porte ouverte (>{{ (door_delay.minutes | default(4)) }}min) - Chauffage {{ 'ÉTEINT' if open_mode == 'off' else 'mode ' + open_mode }}
           
           # Send notification
           - if:
               - condition: template
-                value_template: "{{ notify_dev != '' }}"
+                value_template: "{{ notify_svc != '' }}"
             then:
-              - device_id: !input notify_device
-                domain: mobile_app
-                type: notify
-                message: >
-                  🚪 {{ room }}: Porte ouverte - Chauffage {{ 'éteint' if open_mode == 'off' else 'réduit (' + open_mode + ')' }}
-                title: "Chauffage désactivé"
+              - service: "{{ notify_svc }}"
+                data:
+                  message: >
+                    🚪 {{ room }}: Porte ouverte - Chauffage {{ 'éteint' if open_mode == 'off' else 'réduit (' + open_mode + ')' }}
+                  title: "Chauffage désactivé"
 
       # === DOOR CLOSED ===
       - conditions:
           - condition: template
             value_template: "{{ trigger.id == 'door_closed' }}"
+        sequence:
           # Wait minimum closed duration
           - delay: !input min_closed_duration
           # Verify ALL sensors are now closed
           - condition: template
             value_template: >
               {{ expand(all_sensors) | selectattr('state','eq', state_open) | list | length == 0 }}
-        sequence:
+          
           # Update door status sensor
           - if:
               - condition: template
@@ -434,7 +420,7 @@ action:
             then:
               - service: input_text.set_value
                 target:
-                  entity_id: !input door_status_sensor
+                  entity_id: "{{ door_sensor }}"
                 data:
                   value: "Toutes les portes fermées"
           
@@ -473,7 +459,7 @@ action:
             then:
               - service: input_text.set_value
                 target:
-                  entity_id: !input log_entity
+                  entity_id: "{{ log_ent }}"
                 data:
                   value: >
                     {{ now().strftime('%H:%M') }} - {{ room }}: Tout fermé - Chauffage {{ 'ALLUMÉ' if restore_mode != 'off' else 'ÉTEINT' }} ({{ restore_mode }})
@@ -481,14 +467,13 @@ action:
           # Send notification
           - if:
               - condition: template
-                value_template: "{{ notify_dev != '' }}"
+                value_template: "{{ notify_svc != '' }}"
             then:
-              - device_id: !input notify_device
-                domain: mobile_app
-                type: notify
-                message: >
-                  ✅ {{ room }}: Tout fermé - Chauffage {{ 'rallumé' if restore_mode != 'off' else 'éteint' }} ({{ restore_mode }})
-                title: "Chauffage restauré"
+              - service: "{{ notify_svc }}"
+                data:
+                  message: >
+                    ✅ {{ room }}: Tout fermé - Chauffage {{ 'rallumé' if restore_mode != 'off' else 'éteint' }} ({{ restore_mode }})
+                  title: "Chauffage restauré"
     default: []
 
 mode: single
