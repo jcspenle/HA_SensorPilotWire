@@ -1,5 +1,5 @@
 blueprint:
-  name: Heating Control - Window/Door Open Detection v1.0.1
+  name: Heating Control - Window/Door Open Detection v1.0.2
   source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control.yaml
   description: >
     Automated heating control with window/door sensors.
@@ -7,6 +7,7 @@ blueprint:
     - Configurable modes when open/closed (comfort, comfort-1, comfort-2, eco, off).
     - Automation status selector (Activated / Bypass).
     - Window sensors required; door sensors optional.
+    - Support for inverted sensor logic (on=closed / off=open).
   domain: automation
 
   input:
@@ -43,6 +44,14 @@ blueprint:
           multiple: true
       default: []
 
+    sensor_logic:
+      name: Sensor Logic
+      description: "Normal: on=open, off=closed | Inverted: on=closed, off=open"
+      selector:
+        select:
+          options: ["Normal","Inverted"]
+      default: "Normal"
+
     door_open_delay:
       name: Door open delay
       description: Minimum continuous open time before action for DOOR sensors.
@@ -78,40 +87,41 @@ variables:
   windows: !input window_sensors
   doors: !input door_sensors
   door_delay: !input door_open_delay
+  logic: !input sensor_logic
   all_sensors: >
     {{ (windows | default([])) + (doors | default([])) }}
   has_doors: >
     {{ (doors | default([]) | length) > 0 }}
+  # Define open/closed states based on sensor logic
+  state_open: >
+    {{ 'off' if logic == 'Inverted' else 'on' }}
+  state_closed: >
+    {{ 'on' if logic == 'Inverted' else 'off' }}
 
 # ===== Triggers =====
 trigger:
-  # Windows opened (immediate)
+  # Windows state change
   - platform: state
     entity_id: !input window_sensors
-    to: "on"
-    id: window_opened
+    id: window_state_change
 
-  # Windows closed
-  - platform: state
-    entity_id: !input window_sensors
-    to: "off"
-    id: sensor_closed
-
-  # Template trigger for doors (only fires if doors exist)
+  # Template trigger for doors opened (only fires if doors exist)
   - platform: template
     value_template: >
       {% set door_list = doors | default([]) %}
+      {% set open_state = 'off' if logic == 'Inverted' else 'on' %}
       {{ door_list | length > 0 and 
-         expand(door_list) | selectattr('state','eq','on') | list | length > 0 }}
+         expand(door_list) | selectattr('state','eq', open_state) | list | length > 0 }}
     id: door_opened
 
   # Template trigger for door closed (only fires if doors exist)
   - platform: template
     value_template: >
       {% set door_list = doors | default([]) %}
+      {% set closed_state = 'on' if logic == 'Inverted' else 'off' %}
       {{ door_list | length > 0 and 
-         expand(door_list) | selectattr('state','eq','off') | list | length > 0 }}
-    id: sensor_closed
+         expand(door_list) | selectattr('state','eq', closed_state) | list | length > 0 }}
+    id: door_closed
 
 # ===== Conditions =====
 condition:
@@ -125,26 +135,59 @@ condition:
 # ===== Actions =====
 action:
   - choose:
-      # === WINDOW OPENED (immediate action) ===
+      # === WINDOW STATE CHANGE ===
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'window_opened' }}"
+            value_template: "{{ trigger.id == 'window_state_change' }}"
         sequence:
-          # Apply OPEN mode immediately
           - choose:
+              # WINDOW OPENED (immediate action)
               - conditions:
                   - condition: template
-                    value_template: "{{ open_mode == 'off' }}"
+                    value_template: "{{ trigger.to_state.state == state_open }}"
                 sequence:
-                  - service: climate.turn_off
-                    target:
-                      entity_id: !input climate_entity
-            default:
-              - service: climate.set_preset_mode
-                target:
-                  entity_id: !input climate_entity
-                data:
-                  preset_mode: "{{ open_mode }}"
+                  # Apply OPEN mode immediately
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ open_mode == 'off' }}"
+                        sequence:
+                          - service: climate.turn_off
+                            target:
+                              entity_id: !input climate_entity
+                    default:
+                      - service: climate.set_preset_mode
+                        target:
+                          entity_id: !input climate_entity
+                        data:
+                          preset_mode: "{{ open_mode }}"
+
+              # WINDOW CLOSED - check if ALL sensors are closed
+              - conditions:
+                  - condition: template
+                    value_template: "{{ trigger.to_state.state == state_closed }}"
+                  # Verify ALL sensors are now closed
+                  - condition: template
+                    value_template: >
+                      {{ expand(all_sensors) | selectattr('state','eq', state_open) | list | length == 0 }}
+                sequence:
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ closed_mode == 'off' }}"
+                        sequence:
+                          - service: climate.turn_off
+                            target:
+                              entity_id: !input climate_entity
+                    default:
+                      - service: climate.turn_on
+                        target:
+                          entity_id: !input climate_entity
+                      - service: climate.set_preset_mode
+                        target:
+                          entity_id: !input climate_entity
+                        data:
+                          preset_mode: "{{ closed_mode }}"
 
       # === DOOR OPENED (with delay) ===
       - conditions:
@@ -156,7 +199,7 @@ action:
           # Verify at least one door is still open
           - condition: template
             value_template: >
-              {{ expand(doors) | selectattr('state','eq','on') | list | length > 0 }}
+              {{ expand(doors) | selectattr('state','eq', state_open) | list | length > 0 }}
           # Apply OPEN mode
           - choose:
               - conditions:
@@ -173,14 +216,14 @@ action:
                 data:
                   preset_mode: "{{ open_mode }}"
 
-      # === SENSOR CLOSED (all closed = restore) ===
+      # === DOOR CLOSED ===
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'sensor_closed' }}"
+            value_template: "{{ trigger.id == 'door_closed' }}"
           # Verify ALL sensors are now closed
           - condition: template
             value_template: >
-              {{ expand(all_sensors) | selectattr('state','eq','on') | list | length == 0 }}
+              {{ expand(all_sensors) | selectattr('state','eq', state_open) | list | length == 0 }}
         sequence:
           - choose:
               - conditions:
