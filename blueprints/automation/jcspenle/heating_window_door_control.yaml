@@ -80,30 +80,38 @@ variables:
   door_delay: !input door_open_delay
   all_sensors: >
     {{ (windows | default([])) + (doors | default([])) }}
+  has_doors: >
+    {{ (doors | default([]) | length) > 0 }}
 
 # ===== Triggers =====
 trigger:
-  # Any window opened (immediate)
+  # Windows opened (immediate)
   - platform: state
     entity_id: !input window_sensors
     to: "on"
-    id: opened
+    id: window_opened
 
-  # Any door opened (no 'for' here; delay handled in actions; list may be empty)
-  - platform: state
-    entity_id: !input door_sensors
-    to: "on"
-    id: opened
-
-  # Any sensor closed
+  # Windows closed
   - platform: state
     entity_id: !input window_sensors
     to: "off"
-    id: closed
-  - platform: state
-    entity_id: !input door_sensors
-    to: "off"
-    id: closed
+    id: sensor_closed
+
+  # Template trigger for doors (only fires if doors exist)
+  - platform: template
+    value_template: >
+      {% set door_list = doors | default([]) %}
+      {{ door_list | length > 0 and 
+         expand(door_list) | selectattr('state','eq','on') | list | length > 0 }}
+    id: door_opened
+
+  # Template trigger for door closed (only fires if doors exist)
+  - platform: template
+    value_template: >
+      {% set door_list = doors | default([]) %}
+      {{ door_list | length > 0 and 
+         expand(door_list) | selectattr('state','eq','off') | list | length > 0 }}
+    id: sensor_closed
 
 # ===== Conditions =====
 condition:
@@ -113,34 +121,42 @@ condition:
   # Require at least one window sensor selected
   - condition: template
     value_template: "{{ (windows | default([])) | length > 0 }}"
-  # If open-trigger -> always proceed; on close-trigger -> ensure ALL sensors are closed
-  - condition: or
-    conditions:
-      - condition: template
-        value_template: "{{ trigger.id == 'opened' }}"
-      - condition: template
-        value_template: >
-          {{ trigger.id == 'closed'
-             and (expand(all_sensors) | selectattr('state','eq','on') | list | length == 0) }}
 
 # ===== Actions =====
 action:
   - choose:
-      # === OPEN CASE ===
+      # === WINDOW OPENED (immediate action) ===
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'opened' }}"
+            value_template: "{{ trigger.id == 'window_opened' }}"
         sequence:
-          # If it's a DOOR (in the 'doors' list), wait the configured delay and ensure still open
+          # Apply OPEN mode immediately
           - choose:
               - conditions:
                   - condition: template
-                    value_template: "{{ trigger.entity_id in doors }}"
+                    value_template: "{{ open_mode == 'off' }}"
                 sequence:
-                  - delay: !input door_open_delay
-                  - condition: template
-                    value_template: "{{ is_state(trigger.entity_id, 'on') }}"
-            default: []
+                  - service: climate.turn_off
+                    target:
+                      entity_id: !input climate_entity
+            default:
+              - service: climate.set_preset_mode
+                target:
+                  entity_id: !input climate_entity
+                data:
+                  preset_mode: "{{ open_mode }}"
+
+      # === DOOR OPENED (with delay) ===
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'door_opened' }}"
+        sequence:
+          # Wait configured delay
+          - delay: !input door_open_delay
+          # Verify at least one door is still open
+          - condition: template
+            value_template: >
+              {{ expand(doors) | selectattr('state','eq','on') | list | length > 0 }}
           # Apply OPEN mode
           - choose:
               - conditions:
@@ -157,10 +173,14 @@ action:
                 data:
                   preset_mode: "{{ open_mode }}"
 
-      # === ALL CLOSED CASE ===
+      # === SENSOR CLOSED (all closed = restore) ===
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'closed' }}"
+            value_template: "{{ trigger.id == 'sensor_closed' }}"
+          # Verify ALL sensors are now closed
+          - condition: template
+            value_template: >
+              {{ expand(all_sensors) | selectattr('state','eq','on') | list | length == 0 }}
         sequence:
           - choose:
               - conditions:
