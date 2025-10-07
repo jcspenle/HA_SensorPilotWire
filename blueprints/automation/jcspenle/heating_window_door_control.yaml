@@ -108,9 +108,15 @@ blueprint:
 
     notify_service:
       name: Service de notification (optionnel)
-      description: Service notify à utiliser (ex. "notify.mobile_app_iphone", "notify.all_devices"). Laisser vide pour désactiver.
+      description: Service notify à utiliser pour les notifications. Laisser vide pour désactiver.
       selector:
-        text: {}
+        select:
+          options:
+            - label: "Aucun (désactivé)"
+              value: ""
+            - label: "Tous les appareils"
+              value: "notify.notify"
+          custom_value: true
       default: ""
 
     log_entity:
