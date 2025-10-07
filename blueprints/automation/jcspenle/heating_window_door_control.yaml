@@ -1,5 +1,5 @@
 blueprint:
-  name: Heating Control - Window/Door Open Detection v1.1
+  name: Heating Control - Window/Door Open Detection v2.0
   source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control.yaml
   description: >
     Automated heating control with window/door sensors.
@@ -153,6 +153,14 @@ variables:
   smart_mode: !input smart_restore
   room: !input room_name
   notify_devs: !input notify_devices
+  # Convert device IDs to notify services
+  notify_services: >
+    {% set ns = namespace(services=[]) %}
+    {% for device_id in notify_devs %}
+      {% set device_name = device_attr(device_id, 'name') | lower | replace(' ', '_') | replace('-', '_') %}
+      {% set ns.services = ns.services + ['notify.mobile_app_' + device_name] %}
+    {% endfor %}
+    {{ ns.services }}
   log_ent: !input log_entity
   window_sensor: !input window_status_sensor
   door_sensor: !input door_status_sensor
@@ -257,14 +265,13 @@ action:
                   
                   # Send notification
                   - repeat:
-                      for_each: "{{ notify_devs }}"
+                      for_each: "{{ notify_services }}"
                       sequence:
-                        - device_id: "{{ repeat.item }}"
-                          domain: mobile_app
-                          type: notify
-                          message: >
-                            🪟 {{ room }}: Fenêtre ouverte - Chauffage {{ 'éteint' if open_mode == 'off' else 'réduit (' + open_mode + ')' }}
-                          title: "Chauffage désactivé"
+                        - service: "{{ repeat.item }}"
+                          data:
+                            message: >
+                              🪟 {{ room }}: Fenêtre ouverte - Chauffage {{ 'éteint' if open_mode == 'off' else 'réduit (' + open_mode + ')' }}
+                            title: "Chauffage désactivé"
 
               # WINDOW CLOSED - check if ALL sensors are closed
               - conditions:
@@ -331,14 +338,13 @@ action:
                   
                   # Send notification
                   - repeat:
-                      for_each: "{{ notify_devs }}"
+                      for_each: "{{ notify_services }}"
                       sequence:
-                        - device_id: "{{ repeat.item }}"
-                          domain: mobile_app
-                          type: notify
-                          message: >
-                            ✅ {{ room }}: Tout fermé - Chauffage {{ 'rallumé' if restore_mode != 'off' else 'éteint' }} ({{ restore_mode }})
-                          title: "Chauffage restauré"
+                        - service: "{{ repeat.item }}"
+                          data:
+                            message: >
+                              ✅ {{ room }}: Tout fermé - Chauffage {{ 'rallumé' if restore_mode != 'off' else 'éteint' }} ({{ restore_mode }})
+                            title: "Chauffage restauré"
 
       # === DOOR OPENED (with delay) ===
       - conditions:
@@ -394,14 +400,13 @@ action:
           
           # Send notification
           - repeat:
-              for_each: "{{ notify_devs }}"
+              for_each: "{{ notify_services }}"
               sequence:
-                - device_id: "{{ repeat.item }}"
-                  domain: mobile_app
-                  type: notify
-                  message: >
-                    🚪 {{ room }}: Porte ouverte - Chauffage {{ 'éteint' if open_mode == 'off' else 'réduit (' + open_mode + ')' }}
-                  title: "Chauffage désactivé"
+                - service: "{{ repeat.item }}"
+                  data:
+                    message: >
+                      🚪 {{ room }}: Porte ouverte - Chauffage {{ 'éteint' if open_mode == 'off' else 'réduit (' + open_mode + ')' }}
+                    title: "Chauffage désactivé"
 
       # === DOOR CLOSED ===
       - conditions:
@@ -468,14 +473,13 @@ action:
           
           # Send notification
           - repeat:
-              for_each: "{{ notify_devs }}"
+              for_each: "{{ notify_services }}"
               sequence:
-                - device_id: "{{ repeat.item }}"
-                  domain: mobile_app
-                  type: notify
-                  message: >
-                    ✅ {{ room }}: Tout fermé - Chauffage {{ 'rallumé' if restore_mode != 'off' else 'éteint' }} ({{ restore_mode }})
-                  title: "Chauffage restauré"
+                - service: "{{ repeat.item }}"
+                  data:
+                    message: >
+                      ✅ {{ room }}: Tout fermé - Chauffage {{ 'rallumé' if restore_mode != 'off' else 'éteint' }} ({{ restore_mode }})
+                    title: "Chauffage restauré"
     default: []
 
 mode: single
