@@ -1,5 +1,5 @@
 blueprint:
-  name: Heating Control - Window/Door Open Detection v2.1
+  name: Heating Control - Window/Door Open Detection v1.1
   source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control.yaml
   description: >
     Automated heating control with window/door sensors.
