@@ -1,11 +1,12 @@
 blueprint:
-  name: Heating Control - Window/Door Open Detection v1.1
-  source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control.yaml
+  name: Heating Control - Window/Door Open Detection v1.2 Universal
+  source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control_universal.yaml
   description: >
-    Automated heating control with window/door sensors.
+    Automated heating control with window/door sensors - Compatible Standard & Zigbee modules.
     - Windows: immediate action; Doors: action after a configurable delay (default 4 minutes).
     - Configurable modes when open/closed (comfort, comfort-1, comfort-2, eco, off).
     - Automation status selector (Activated / Bypass).
+    - Module type selector: Standard (climate presets) or Zigbee (select entity).
     - Window sensors required; door sensors optional.
     - Support for inverted sensor logic (on=closed / off=open).
     - Notifications in French when heating state changes.
@@ -23,11 +24,27 @@ blueprint:
           options: ["Activé","Bypass"]
       default: "Activé"
 
+    module_type:
+      name: Type de module chauffage
+      description: "Standard: utilise les presets climate | Zigbee: utilise l'entité select fil pilote"
+      selector:
+        select:
+          options: ["Standard", "Zigbee"]
+      default: "Standard"
+
     climate_entity:
       name: Entité Climate (Radiateur)
       selector:
         entity:
           domain: climate
+
+    pilot_wire_select:
+      name: Entité Select Fil Pilote (pour Zigbee uniquement)
+      description: Sélectionner l'entité select.xxx_pilot_wire_mode pour les modules Zigbee. Laisser vide pour les modules Standard.
+      selector:
+        entity:
+          domain: select
+      default: ""
 
     window_sensors:
       name: Capteurs de fenêtres (requis)
@@ -142,7 +159,9 @@ blueprint:
 # ===== Variables =====
 variables:
   status: !input automation_status
+  module_type: !input module_type
   climate: !input climate_entity
+  pilot_select: !input pilot_wire_select
   open_mode: !input mode_when_open
   closed_mode: !input mode_when_closed
   windows: !input window_sensors
@@ -165,7 +184,20 @@ variables:
   state_closed: >
     {{ 'on' if logic == 'Inversé' else 'off' }}
   current_preset: >
-    {{ state_attr(climate, 'preset_mode') }}
+    {% if module_type == 'Zigbee' and pilot_select != '' %}
+      {{ states(pilot_select) }}
+    {% else %}
+      {{ state_attr(climate, 'preset_mode') }}
+    {% endif %}
+  # Mapper les modes pour Zigbee (comfort-1 → comfort_-1)
+  open_mode_mapped: >
+    {% set mode = open_mode %}
+    {{ 'comfort_-1' if mode == 'comfort-1' else 
+       'comfort_-2' if mode == 'comfort-2' else mode }}
+  closed_mode_mapped: >
+    {% set mode = closed_mode %}
+    {{ 'comfort_-1' if mode == 'comfort-1' else 
+       'comfort_-2' if mode == 'comfort-2' else mode }}
 
 # ===== Triggers =====
 trigger:
@@ -227,21 +259,34 @@ action:
                           value: >
                             {{ expand(windows) | selectattr('state','eq', state_open) | list | length }} fenêtre(s) ouverte(s)
                   
-                  # Apply OPEN mode immediately
+                  # Apply OPEN mode according to module type
                   - choose:
+                      # MODULE ZIGBEE
                       - conditions:
                           - condition: template
-                            value_template: "{{ open_mode == 'off' }}"
+                            value_template: "{{ module_type == 'Zigbee' }}"
                         sequence:
-                          - service: climate.turn_off
+                          - service: select.select_option
+                            target:
+                              entity_id: "{{ pilot_select }}"
+                            data:
+                              option: "{{ open_mode_mapped }}"
+                    # MODULE STANDARD
+                    default:
+                      - choose:
+                          - conditions:
+                              - condition: template
+                                value_template: "{{ open_mode == 'off' }}"
+                            sequence:
+                              - service: climate.turn_off
+                                target:
+                                  entity_id: !input climate_entity
+                        default:
+                          - service: climate.set_preset_mode
                             target:
                               entity_id: !input climate_entity
-                    default:
-                      - service: climate.set_preset_mode
-                        target:
-                          entity_id: !input climate_entity
-                        data:
-                          preset_mode: "{{ open_mode }}"
+                            data:
+                              preset_mode: "{{ open_mode }}"
                   
                   # Log action
                   - if:
@@ -295,30 +340,43 @@ action:
                   # Determine mode to restore
                   - variables:
                       restore_mode: >
-                        {% if smart_mode and current_preset != none %}
+                        {% if smart_mode and current_preset != none and current_preset != 'none' %}
                           {{ current_preset }}
                         {% else %}
-                          {{ closed_mode }}
+                          {{ closed_mode if module_type == 'Standard' else closed_mode_mapped }}
                         {% endif %}
                   
-                  # Apply restore mode
+                  # Apply restore mode according to module type
                   - choose:
+                      # MODULE ZIGBEE
                       - conditions:
                           - condition: template
-                            value_template: "{{ restore_mode == 'off' }}"
+                            value_template: "{{ module_type == 'Zigbee' }}"
                         sequence:
-                          - service: climate.turn_off
+                          - service: select.select_option
+                            target:
+                              entity_id: "{{ pilot_select }}"
+                            data:
+                              option: "{{ restore_mode }}"
+                    # MODULE STANDARD
+                    default:
+                      - choose:
+                          - conditions:
+                              - condition: template
+                                value_template: "{{ restore_mode == 'off' }}"
+                            sequence:
+                              - service: climate.turn_off
+                                target:
+                                  entity_id: !input climate_entity
+                        default:
+                          - service: climate.turn_on
                             target:
                               entity_id: !input climate_entity
-                    default:
-                      - service: climate.turn_on
-                        target:
-                          entity_id: !input climate_entity
-                      - service: climate.set_preset_mode
-                        target:
-                          entity_id: !input climate_entity
-                        data:
-                          preset_mode: "{{ restore_mode }}"
+                          - service: climate.set_preset_mode
+                            target:
+                              entity_id: !input climate_entity
+                            data:
+                              preset_mode: "{{ restore_mode }}"
                   
                   # Log action
                   - if:
@@ -370,21 +428,34 @@ action:
                   value: >
                     {{ expand(doors) | selectattr('state','eq', state_open) | list | length }} porte(s) ouverte(s)
           
-          # Apply OPEN mode
+          # Apply OPEN mode according to module type
           - choose:
+              # MODULE ZIGBEE
               - conditions:
                   - condition: template
-                    value_template: "{{ open_mode == 'off' }}"
+                    value_template: "{{ module_type == 'Zigbee' }}"
                 sequence:
-                  - service: climate.turn_off
+                  - service: select.select_option
+                    target:
+                      entity_id: "{{ pilot_select }}"
+                    data:
+                      option: "{{ open_mode_mapped }}"
+            # MODULE STANDARD
+            default:
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ open_mode == 'off' }}"
+                    sequence:
+                      - service: climate.turn_off
+                        target:
+                          entity_id: !input climate_entity
+                default:
+                  - service: climate.set_preset_mode
                     target:
                       entity_id: !input climate_entity
-            default:
-              - service: climate.set_preset_mode
-                target:
-                  entity_id: !input climate_entity
-                data:
-                  preset_mode: "{{ open_mode }}"
+                    data:
+                      preset_mode: "{{ open_mode }}"
           
           # Log action
           - if:
@@ -438,30 +509,43 @@ action:
           # Determine mode to restore
           - variables:
               restore_mode: >
-                {% if smart_mode and current_preset != none %}
+                {% if smart_mode and current_preset != none and current_preset != 'none' %}
                   {{ current_preset }}
                 {% else %}
-                  {{ closed_mode }}
+                  {{ closed_mode if module_type == 'Standard' else closed_mode_mapped }}
                 {% endif %}
           
-          # Apply restore mode
+          # Apply restore mode according to module type
           - choose:
+              # MODULE ZIGBEE
               - conditions:
                   - condition: template
-                    value_template: "{{ restore_mode == 'off' }}"
+                    value_template: "{{ module_type == 'Zigbee' }}"
                 sequence:
-                  - service: climate.turn_off
+                  - service: select.select_option
+                    target:
+                      entity_id: "{{ pilot_select }}"
+                    data:
+                      option: "{{ restore_mode }}"
+            # MODULE STANDARD
+            default:
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ restore_mode == 'off' }}"
+                    sequence:
+                      - service: climate.turn_off
+                        target:
+                          entity_id: !input climate_entity
+                default:
+                  - service: climate.turn_on
                     target:
                       entity_id: !input climate_entity
-            default:
-              - service: climate.turn_on
-                target:
-                  entity_id: !input climate_entity
-              - service: climate.set_preset_mode
-                target:
-                  entity_id: !input climate_entity
-                data:
-                  preset_mode: "{{ restore_mode }}"
+                  - service: climate.set_preset_mode
+                    target:
+                      entity_id: !input climate_entity
+                    data:
+                      preset_mode: "{{ restore_mode }}"
           
           # Log action
           - if:
