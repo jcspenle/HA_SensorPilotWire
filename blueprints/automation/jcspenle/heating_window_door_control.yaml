@@ -1,12 +1,12 @@
 blueprint:
-  name: Heating Control - Window/Door Open Detection v1.2 Universal
+  name: Heating Control - Window/Door Open Detection v2.0 Standard/NodOn
   source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control_universal.yaml
   description: >
-    Automated heating control with window/door sensors - Compatible Standard & Zigbee modules.
+    Automated heating control with window/door sensors - Compatible Standard & NodOn modules.
     - Windows: immediate action; Doors: action after a configurable delay (default 4 minutes).
     - Configurable modes when open/closed (comfort, comfort-1, comfort-2, eco, off).
     - Automation status selector (Activated / Bypass).
-    - Module type selector: Standard (climate presets) or Zigbee (select entity).
+    - Module type selector: Standard (climate presets) or NodOn (select entity).
     - Window sensors required; door sensors optional.
     - Support for inverted sensor logic (on=closed / off=open).
     - Notifications in French when heating state changes.
@@ -26,25 +26,24 @@ blueprint:
 
     module_type:
       name: Type de module chauffage
-      description: "Standard: utilise les presets climate | Zigbee: utilise l'entité select fil pilote"
+      description: "Standard: utilise les presets climate | NodOn: utilise l'entité select fil pilote"
       selector:
         select:
-          options: ["Standard", "Zigbee"]
+          options: ["Standard", "NodOn"]
       default: "Standard"
 
-    climate_entity:
-      name: Entité Climate (Radiateur)
+    heating_entity:
+      name: Entité de chauffage
+      description: |
+        Sélectionnez l'entité qui contrôle votre chauffage :
+        - Module Standard : sélectionnez climate.xxx
+        - Module NodOn : sélectionnez select.xxx_pilot_wire_mode
+        Le blueprint détectera automatiquement les bonnes entités.
       selector:
         entity:
-          domain: climate
-
-    pilot_wire_select:
-      name: Entité Select Fil Pilote (pour Zigbee uniquement)
-      description: Sélectionner l'entité select.xxx_pilot_wire_mode pour les modules Zigbee. Laisser vide pour les modules Standard.
-      selector:
-        entity:
-          domain: select
-      default: ""
+          domain: 
+            - climate
+            - select
 
     window_sensors:
       name: Capteurs de fenêtres (requis)
@@ -160,8 +159,31 @@ blueprint:
 variables:
   status: !input automation_status
   module_type: !input module_type
-  climate: !input climate_entity
-  pilot_select: !input pilot_wire_select
+  heating_ent: !input heating_entity
+  
+  # Détection et extraction automatique des entités selon le type
+  climate: >
+    {% if module_type == 'NodOn' %}
+      {% if heating_ent.startswith('select.') %}
+        {{ heating_ent.replace('_pilot_wire_mode', '').replace('select.', 'climate.') }}
+      {% else %}
+        {{ heating_ent }}
+      {% endif %}
+    {% else %}
+      {{ heating_ent }}
+    {% endif %}
+  
+  pilot_select: >
+    {% if module_type == 'NodOn' %}
+      {% if heating_ent.startswith('select.') %}
+        {{ heating_ent }}
+      {% else %}
+        {{ heating_ent.replace('climate.', 'select.') ~ '_pilot_wire_mode' }}
+      {% endif %}
+    {% else %}
+      ''
+    {% endif %}
+  
   open_mode: !input mode_when_open
   closed_mode: !input mode_when_closed
   windows: !input window_sensors
@@ -175,25 +197,32 @@ variables:
   log_ent: !input log_entity
   window_sensor: !input window_status_sensor
   door_sensor: !input door_status_sensor
+  
   all_sensors: >
     {{ (windows | default([])) + (doors | default([])) }}
+  
   has_doors: >
     {{ (doors | default([]) | length) > 0 }}
+  
   state_open: >
     {{ 'off' if logic == 'Inversé' else 'on' }}
+  
   state_closed: >
     {{ 'on' if logic == 'Inversé' else 'off' }}
+  
   current_preset: >
-    {% if module_type == 'Zigbee' and pilot_select != '' %}
+    {% if module_type == 'NodOn' and pilot_select != '' %}
       {{ states(pilot_select) }}
     {% else %}
       {{ state_attr(climate, 'preset_mode') }}
     {% endif %}
-  # Mapper les modes pour Zigbee (comfort-1 → comfort_-1)
+  
+  # Mapper les modes pour NodOn (comfort-1 → comfort_-1)
   open_mode_mapped: >
     {% set mode = open_mode %}
     {{ 'comfort_-1' if mode == 'comfort-1' else 
        'comfort_-2' if mode == 'comfort-2' else mode }}
+  
   closed_mode_mapped: >
     {% set mode = closed_mode %}
     {{ 'comfort_-1' if mode == 'comfort-1' else 
@@ -229,9 +258,16 @@ condition:
   # Must be activated via status
   - condition: template
     value_template: "{{ status == 'Activé' }}"
+  
   # Require at least one window sensor selected
   - condition: template
     value_template: "{{ (windows | default([])) | length > 0 }}"
+  
+  # Validate heating entity corresponds to module type
+  - condition: template
+    value_template: >
+      {{ (module_type == 'Standard' and heating_ent.startswith('climate.')) or
+         (module_type == 'NodOn' and (heating_ent.startswith('select.') or heating_ent.startswith('climate.'))) }}
 
 # ===== Actions =====
 action:
@@ -261,10 +297,10 @@ action:
                   
                   # Apply OPEN mode according to module type
                   - choose:
-                      # MODULE ZIGBEE
+                      # MODULE NODON
                       - conditions:
                           - condition: template
-                            value_template: "{{ module_type == 'Zigbee' }}"
+                            value_template: "{{ module_type == 'NodOn' }}"
                         sequence:
                           - service: select.select_option
                             target:
@@ -280,11 +316,11 @@ action:
                             sequence:
                               - service: climate.turn_off
                                 target:
-                                  entity_id: !input climate_entity
+                                  entity_id: "{{ climate }}"
                         default:
                           - service: climate.set_preset_mode
                             target:
-                              entity_id: !input climate_entity
+                              entity_id: "{{ climate }}"
                             data:
                               preset_mode: "{{ open_mode }}"
                   
@@ -348,10 +384,10 @@ action:
                   
                   # Apply restore mode according to module type
                   - choose:
-                      # MODULE ZIGBEE
+                      # MODULE NODON
                       - conditions:
                           - condition: template
-                            value_template: "{{ module_type == 'Zigbee' }}"
+                            value_template: "{{ module_type == 'NodOn' }}"
                         sequence:
                           - service: select.select_option
                             target:
@@ -367,14 +403,14 @@ action:
                             sequence:
                               - service: climate.turn_off
                                 target:
-                                  entity_id: !input climate_entity
+                                  entity_id: "{{ climate }}"
                         default:
                           - service: climate.turn_on
                             target:
-                              entity_id: !input climate_entity
+                              entity_id: "{{ climate }}"
                           - service: climate.set_preset_mode
                             target:
-                              entity_id: !input climate_entity
+                              entity_id: "{{ climate }}"
                             data:
                               preset_mode: "{{ restore_mode }}"
                   
@@ -430,10 +466,10 @@ action:
           
           # Apply OPEN mode according to module type
           - choose:
-              # MODULE ZIGBEE
+              # MODULE NODON
               - conditions:
                   - condition: template
-                    value_template: "{{ module_type == 'Zigbee' }}"
+                    value_template: "{{ module_type == 'NodOn' }}"
                 sequence:
                   - service: select.select_option
                     target:
@@ -449,11 +485,11 @@ action:
                     sequence:
                       - service: climate.turn_off
                         target:
-                          entity_id: !input climate_entity
+                          entity_id: "{{ climate }}"
                 default:
                   - service: climate.set_preset_mode
                     target:
-                      entity_id: !input climate_entity
+                      entity_id: "{{ climate }}"
                     data:
                       preset_mode: "{{ open_mode }}"
           
@@ -517,10 +553,10 @@ action:
           
           # Apply restore mode according to module type
           - choose:
-              # MODULE ZIGBEE
+              # MODULE NODON
               - conditions:
                   - condition: template
-                    value_template: "{{ module_type == 'Zigbee' }}"
+                    value_template: "{{ module_type == 'NodOn' }}"
                 sequence:
                   - service: select.select_option
                     target:
@@ -536,14 +572,14 @@ action:
                     sequence:
                       - service: climate.turn_off
                         target:
-                          entity_id: !input climate_entity
+                          entity_id: "{{ climate }}"
                 default:
                   - service: climate.turn_on
                     target:
-                      entity_id: !input climate_entity
+                      entity_id: "{{ climate }}"
                   - service: climate.set_preset_mode
                     target:
-                      entity_id: !input climate_entity
+                      entity_id: "{{ climate }}"
                     data:
                       preset_mode: "{{ restore_mode }}"
           
