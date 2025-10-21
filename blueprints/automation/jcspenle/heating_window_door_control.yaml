@@ -1,5 +1,5 @@
 blueprint:
-  name: Heating Control - Window/Door Open Detection v1.2.1 Standard/NodOn
+  name: Heating Control - Window/Door Open Detection v1.2.1
   source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control_universal.yaml
   description: >
     Automated heating control with window/door sensors - Compatible Standard & NodOn modules.
@@ -7,7 +7,7 @@ blueprint:
     - Configurable modes when open/closed (comfort, comfort-1, comfort-2, eco, off).
     - Automation status selector (Activated / Bypass).
     - Module type selector: Standard (climate presets) or NodOn (select entity).
-    - Window sensors required; door sensors optional.
+    - Window or door sensors required (at least one).
     - Support for inverted sensor logic (on=closed / off=open).
     - Notifications in French when heating state changes.
     - Activity logging with room names.
@@ -46,17 +46,18 @@ blueprint:
             - select
 
     window_sensors:
-      name: Capteurs de fenêtres (requis)
-      description: Sélectionner un ou plusieurs capteurs de fenêtre pour cette pièce.
+      name: Capteurs de fenêtres (optionnel)
+      description: Sélectionner un ou plusieurs capteurs de fenêtre pour cette pièce. Laisser vide si seulement des portes.
       selector:
         entity:
           domain: binary_sensor
           device_class: window
           multiple: true
+      default: []
 
     door_sensors:
       name: Capteurs de portes (optionnel)
-      description: Sélectionner les capteurs de porte pour cette pièce (délai avant action). Laisser vide si aucun.
+      description: Sélectionner les capteurs de porte pour cette pièce (délai avant action). Laisser vide si seulement des fenêtres.
       selector:
         entity:
           domain: binary_sensor
@@ -201,6 +202,9 @@ variables:
   all_sensors: >
     {{ (windows | default([])) + (doors | default([])) }}
   
+  has_windows: >
+    {{ (windows | default([]) | length) > 0 }}
+  
   has_doors: >
     {{ (doors | default([]) | length) > 0 }}
   
@@ -230,9 +234,15 @@ variables:
 
 # ===== Triggers =====
 trigger:
-  # Windows state change
-  - platform: state
-    entity_id: !input window_sensors
+  # Windows state change (only if windows configured)
+  - platform: template
+    value_template: >
+      {% set window_list = windows | default([]) %}
+      {% set open_state = 'off' if logic == 'Inversé' else 'on' %}
+      {% set closed_state = 'on' if logic == 'Inversé' else 'off' %}
+      {{ window_list | length > 0 and 
+         (expand(window_list) | selectattr('state','eq', open_state) | list | length > 0 or
+          expand(window_list) | selectattr('state','eq', closed_state) | list | length == window_list | length) }}
     id: window_state_change
 
   # Template trigger for doors opened (only fires if doors exist)
@@ -259,9 +269,9 @@ condition:
   - condition: template
     value_template: "{{ status == 'Activé' }}"
   
-  # Require at least one window sensor selected
+  # Require at least one sensor (window OR door)
   - condition: template
-    value_template: "{{ (windows | default([])) | length > 0 }}"
+    value_template: "{{ has_windows or has_doors }}"
   
   # Validate heating entity corresponds to module type
   - condition: template
