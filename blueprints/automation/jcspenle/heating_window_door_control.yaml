@@ -1,12 +1,12 @@
 blueprint:
-  name: Heating Control - Window/Door Open Detection v1.2 Universal
+  name: Heating Control - Window/Door Open Detection v1.3.0 Universal
   source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control_universal.yaml
   description: >
-    Automated heating control with window/door sensors - Compatible Standard & Zigbee modules.
+    Automated heating control with window/door sensors - Compatible Standard & NodOn modules.
     - Windows: immediate action; Doors: action after a configurable delay (default 4 minutes).
     - Configurable modes when open/closed (comfort, comfort-1, comfort-2, eco, off).
     - Automation status selector (Activated / Bypass).
-    - Module type selector: Standard (climate presets) or Zigbee (select entity).
+    - Module type selector: Standard (climate presets) or NodOn (select entity).
     - Window sensors required; door sensors optional.
     - Support for inverted sensor logic (on=closed / off=open).
     - Notifications in French when heating state changes.
@@ -26,10 +26,10 @@ blueprint:
 
     module_type:
       name: Type de module chauffage
-      description: "Standard: utilise les presets climate | Zigbee: utilise l'entité select fil pilote"
+      description: "Standard: utilise les presets climate | NodOn: utilise l'entité select fil pilote"
       selector:
         select:
-          options: ["Standard", "Zigbee"]
+          options: ["Standard", "NodOn"]
       default: "Standard"
 
     climate_entity:
@@ -39,8 +39,8 @@ blueprint:
           domain: climate
 
     pilot_wire_select:
-      name: Entité Select Fil Pilote (pour Zigbee uniquement)
-      description: Sélectionner l'entité select.xxx_pilot_wire_mode pour les modules Zigbee. Laisser vide pour les modules Standard.
+      name: Entité Select Fil Pilote (pour NodOn uniquement)
+      description: Sélectionner l'entité select.xxx_pilot_wire_mode pour les modules NodOn. Laisser vide pour les modules Standard.
       selector:
         entity:
           domain: select
@@ -184,12 +184,12 @@ variables:
   state_closed: >
     {{ 'on' if logic == 'Inversé' else 'off' }}
   current_preset: >
-    {% if module_type == 'Zigbee' and pilot_select != '' %}
+    {% if module_type == 'NodOn' and pilot_select != '' %}
       {{ states(pilot_select) }}
     {% else %}
       {{ state_attr(climate, 'preset_mode') }}
     {% endif %}
-  # Mapper les modes pour Zigbee (comfort-1 → comfort_-1)
+  # Mapper les modes pour NodOn (comfort-1 → comfort_-1)
   open_mode_mapped: >
     {% set mode = open_mode %}
     {{ 'comfort_-1' if mode == 'comfort-1' else 
@@ -210,42 +210,49 @@ trigger:
   - platform: template
     value_template: >
       {% set door_list = doors | default([]) %}
-      {% set open_state = 'off' if logic == 'Inversé' else 'on' %}
-      {{ door_list | length > 0 and 
-         expand(door_list) | selectattr('state','eq', open_state) | list | length > 0 }}
+      {% if door_list | length == 0 %}
+        false
+      {% else %}
+        {{ expand(door_list) | selectattr('state','eq', state_open) | list | length > 0 }}
+      {% endif %}
     id: door_opened
 
-  # Template trigger for door closed (only fires if doors exist)
+  # Template trigger for doors closed (only fires if doors exist)
   - platform: template
     value_template: >
       {% set door_list = doors | default([]) %}
-      {% set closed_state = 'on' if logic == 'Inversé' else 'off' %}
-      {{ door_list | length > 0 and 
-         expand(door_list) | selectattr('state','eq', closed_state) | list | length > 0 }}
+      {% if door_list | length == 0 %}
+        false
+      {% else %}
+        {{ expand(door_list) | selectattr('state','eq', state_closed) | list | length > 0 }}
+      {% endif %}
     id: door_closed
+
+  # Template trigger for all sensors closed
+  - platform: template
+    value_template: >
+      {{ expand(all_sensors) | selectattr('state','eq', state_closed) | list | length == all_sensors | length }}
+    id: all_sensors_closed
 
 # ===== Conditions =====
 condition:
-  # Must be activated via status
   - condition: template
     value_template: "{{ status == 'Activé' }}"
-  # Require at least one window sensor selected
-  - condition: template
-    value_template: "{{ (windows | default([])) | length > 0 }}"
 
 # ===== Actions =====
 action:
   - choose:
-      # === WINDOW STATE CHANGE ===
+      # === WINDOW STATE CHANGE (immediate action) ===
       - conditions:
           - condition: template
             value_template: "{{ trigger.id == 'window_state_change' }}"
         sequence:
           - choose:
-              # WINDOW OPENED (immediate action)
+              # At least one window opened → Apply OPEN mode
               - conditions:
                   - condition: template
-                    value_template: "{{ trigger.to_state.state == state_open }}"
+                    value_template: >
+                      {{ expand(windows) | selectattr('state','eq', state_open) | list | length > 0 }}
                 sequence:
                   # Update window status sensor
                   - if:
@@ -261,10 +268,10 @@ action:
                   
                   # Apply OPEN mode according to module type
                   - choose:
-                      # MODULE ZIGBEE
+                      # MODULE NODON
                       - conditions:
                           - condition: template
-                            value_template: "{{ module_type == 'Zigbee' }}"
+                            value_template: "{{ module_type == 'NodOn' }}"
                         sequence:
                           - service: select.select_option
                             target:
@@ -314,18 +321,12 @@ action:
                                   🪟 {{ room }}: Fenêtre ouverte - Chauffage {{ 'éteint' if open_mode == 'off' else 'réduit (' + open_mode + ')' }}
                                 title: "Chauffage désactivé"
 
-              # WINDOW CLOSED - check if ALL sensors are closed
+              # All windows closed
               - conditions:
                   - condition: template
-                    value_template: "{{ trigger.to_state.state == state_closed }}"
-                sequence:
-                  # Wait minimum closed duration (anti-bounce)
-                  - delay: !input min_closed_duration
-                  # Verify ALL sensors are now closed
-                  - condition: template
                     value_template: >
-                      {{ expand(all_sensors) | selectattr('state','eq', state_open) | list | length == 0 }}
-                  
+                      {{ expand(windows) | selectattr('state','eq', state_open) | list | length == 0 }}
+                sequence:
                   # Update window status sensor
                   - if:
                       - condition: template
@@ -336,73 +337,86 @@ action:
                           entity_id: "{{ window_sensor }}"
                         data:
                           value: "Toutes les fenêtres fermées"
-                  
-                  # Determine mode to restore
-                  - variables:
-                      restore_mode: >
-                        {% if smart_mode and current_preset != none and current_preset != 'none' %}
-                          {{ current_preset }}
-                        {% else %}
-                          {{ closed_mode if module_type == 'Standard' else closed_mode_mapped }}
-                        {% endif %}
-                  
-                  # Apply restore mode according to module type
-                  - choose:
-                      # MODULE ZIGBEE
-                      - conditions:
-                          - condition: template
-                            value_template: "{{ module_type == 'Zigbee' }}"
-                        sequence:
-                          - service: select.select_option
-                            target:
-                              entity_id: "{{ pilot_select }}"
-                            data:
-                              option: "{{ restore_mode }}"
-                    # MODULE STANDARD
-                    default:
-                      - choose:
-                          - conditions:
-                              - condition: template
-                                value_template: "{{ restore_mode == 'off' }}"
-                            sequence:
-                              - service: climate.turn_off
-                                target:
-                                  entity_id: !input climate_entity
-                        default:
-                          - service: climate.turn_on
-                            target:
-                              entity_id: !input climate_entity
-                          - service: climate.set_preset_mode
-                            target:
-                              entity_id: !input climate_entity
-                            data:
-                              preset_mode: "{{ restore_mode }}"
-                  
-                  # Log action
-                  - if:
+            default: []
+
+      # === ALL SENSORS CLOSED ===
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'all_sensors_closed' }}"
+        sequence:
+          # Wait minimum closed duration
+          - delay: !input min_closed_duration
+          # Verify ALL sensors are still closed
+          - condition: template
+            value_template: >
+              {{ expand(all_sensors) | selectattr('state','eq', state_open) | list | length == 0 }}
+          
+          # Determine mode to restore
+          - variables:
+              restore_mode: >
+                {% if smart_mode and current_preset != none and current_preset != 'none' %}
+                  {{ current_preset }}
+                {% else %}
+                  {{ closed_mode if module_type == 'Standard' else closed_mode_mapped }}
+                {% endif %}
+          
+          # Apply restore mode according to module type
+          - choose:
+              # MODULE NODON
+              - conditions:
+                  - condition: template
+                    value_template: "{{ module_type == 'NodOn' }}"
+                sequence:
+                  - service: select.select_option
+                    target:
+                      entity_id: "{{ pilot_select }}"
+                    data:
+                      option: "{{ restore_mode }}"
+            # MODULE STANDARD
+            default:
+              - choose:
+                  - conditions:
                       - condition: template
-                        value_template: "{{ log_ent != '' }}"
-                    then:
-                      - service: input_text.set_value
+                        value_template: "{{ restore_mode == 'off' }}"
+                    sequence:
+                      - service: climate.turn_off
                         target:
-                          entity_id: "{{ log_ent }}"
-                        data:
-                          value: >
-                            {{ now().strftime('%H:%M') }} - {{ room }}: Tout fermé - Chauffage {{ 'ALLUMÉ' if restore_mode != 'off' else 'ÉTEINT' }} ({{ restore_mode }})
-                  
-                  # Send notification
-                  - if:
-                      - condition: template
-                        value_template: "{{ notify_devs | length > 0 }}"
-                    then:
-                      - repeat:
-                          for_each: "{{ notify_devs }}"
-                          sequence:
-                            - service: notify.mobile_app_{{ device_attr(repeat.item, 'name') | lower | replace(' ', '_') | replace('-', '_') }}
-                              data:
-                                message: >
-                                  ✅ {{ room }}: Tout fermé - Chauffage {{ 'rallumé' if restore_mode != 'off' else 'éteint' }} ({{ restore_mode }})
-                                title: "Chauffage restauré"
+                          entity_id: !input climate_entity
+                default:
+                  - service: climate.turn_on
+                    target:
+                      entity_id: !input climate_entity
+                  - service: climate.set_preset_mode
+                    target:
+                      entity_id: !input climate_entity
+                    data:
+                      preset_mode: "{{ restore_mode }}"
+          
+          # Log action
+          - if:
+              - condition: template
+                value_template: "{{ log_ent != '' }}"
+            then:
+              - service: input_text.set_value
+                target:
+                  entity_id: "{{ log_ent }}"
+                data:
+                  value: >
+                    {{ now().strftime('%H:%M') }} - {{ room }}: Tout fermé - Chauffage {{ 'ALLUMÉ' if restore_mode != 'off' else 'ÉTEINT' }} ({{ restore_mode }})
+          
+          # Send notification
+          - if:
+              - condition: template
+                value_template: "{{ notify_devs | length > 0 }}"
+            then:
+              - repeat:
+                  for_each: "{{ notify_devs }}"
+                  sequence:
+                    - service: notify.mobile_app_{{ device_attr(repeat.item, 'name') | lower | replace(' ', '_') | replace('-', '_') }}
+                      data:
+                        message: >
+                          ✅ {{ room }}: Tout fermé - Chauffage {{ 'rallumé' if restore_mode != 'off' else 'éteint' }} ({{ restore_mode }})
+                        title: "Chauffage restauré"
 
       # === DOOR OPENED (with delay) ===
       - conditions:
@@ -430,10 +444,10 @@ action:
           
           # Apply OPEN mode according to module type
           - choose:
-              # MODULE ZIGBEE
+              # MODULE NODON
               - conditions:
                   - condition: template
-                    value_template: "{{ module_type == 'Zigbee' }}"
+                    value_template: "{{ module_type == 'NodOn' }}"
                 sequence:
                   - service: select.select_option
                     target:
@@ -517,10 +531,10 @@ action:
           
           # Apply restore mode according to module type
           - choose:
-              # MODULE ZIGBEE
+              # MODULE NODON
               - conditions:
                   - condition: template
-                    value_template: "{{ module_type == 'Zigbee' }}"
+                    value_template: "{{ module_type == 'NodOn' }}"
                 sequence:
                   - service: select.select_option
                     target:
