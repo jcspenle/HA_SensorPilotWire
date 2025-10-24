@@ -1,78 +1,81 @@
 blueprint:
-  name: Heating Control - Window/Door Open Detection v1.3.0
-  source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control.yaml
+  name: Heating Control - Window/Door Open Detection v1.2 Universal
+  source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control_universal.yaml
   description: >
-    Simplified and robust heating control with window/door sensors.
-    - Windows: immediate action | Doors: configurable delay (default 4 min)
-    - Standard (climate presets) or NodOn (select entity) modules
-    - Support for inverted sensor logic (on=closed / off=open)
-    - Smart restoration mode to remember previous state
-    - French notifications and activity logging
-    - v1.3.0: Complete rewrite - simplified, consistent, English keywords
+    Automated heating control with window/door sensors - Compatible Standard & Zigbee modules.
+    - Windows: immediate action; Doors: action after a configurable delay (default 4 minutes).
+    - Configurable modes when open/closed (comfort, comfort-1, comfort-2, eco, off).
+    - Automation status selector (Activated / Bypass).
+    - Module type selector: Standard (climate presets) or Zigbee (select entity).
+    - Window sensors required; door sensors optional.
+    - Support for inverted sensor logic (on=closed / off=open).
+    - Notifications in French when heating state changes.
+    - Activity logging with room names.
+    - Smart mode: restores previous preset when closing.
+    - Dashboard sensors for windows and doors status.
   domain: automation
 
   input:
-    # === CORE SETTINGS ===
     automation_status:
-      name: Automation Status
-      description: Choose 'Active' to enable or 'Bypass' to disable the automation
+      name: Statut de l'automation
+      description: Choisir 'Activé' pour activer la logique ou 'Bypass' pour la désactiver.
       selector:
         select:
-          options: ["Active", "Bypass"]
-      default: "Active"
+          options: ["Activé","Bypass"]
+      default: "Activé"
 
     module_type:
-      name: Heating Module Type
-      description: "Standard: uses climate presets | NodOn: uses select entity"
+      name: Type de module chauffage
+      description: "Standard: utilise les presets climate | Zigbee: utilise l'entité select fil pilote"
       selector:
         select:
-          options: ["Standard", "NodOn"]
+          options: ["Standard", "Zigbee"]
       default: "Standard"
 
-    heating_entity:
-      name: Heating Entity
-      description: |
-        Select the entity that controls your heating:
-        - Standard module: select climate.xxx
-        - NodOn module: select select.xxx_pilot_wire_mode or climate.xxx
-        The blueprint will automatically detect the correct entities.
+    climate_entity:
+      name: Entité Climate (Radiateur)
       selector:
         entity:
-          domain: 
-            - climate
-            - select
+          domain: climate
 
-    # === SENSORS ===
+    pilot_wire_select:
+      name: Entité Select Fil Pilote (pour Zigbee uniquement)
+      description: Sélectionner l'entité select.xxx_pilot_wire_mode pour les modules Zigbee. Laisser vide pour les modules Standard.
+      selector:
+        entity:
+          domain: select
+      default: ""
+
     window_sensors:
-      name: Window Sensors (optional)
-      description: Select one or more window sensors. Leave empty if only doors.
+      name: Capteurs de fenêtres (requis)
+      description: Sélectionner un ou plusieurs capteurs de fenêtre pour cette pièce.
       selector:
         entity:
           domain: binary_sensor
+          device_class: window
           multiple: true
-      default: []
 
     door_sensors:
-      name: Door Sensors (optional)
-      description: Select door sensors (will wait delay before action). Leave empty if only windows.
+      name: Capteurs de portes (optionnel)
+      description: Sélectionner les capteurs de porte pour cette pièce (délai avant action). Laisser vide si aucun.
       selector:
         entity:
           domain: binary_sensor
+          device_class: door
           multiple: true
       default: []
 
     sensor_logic:
-      name: Sensor Logic
-      description: "Normal: on=open, off=closed | Inverted: on=closed, off=open"
+      name: Logique des capteurs
+      description: "Normal: on=ouvert, off=fermé | Inversé: on=fermé, off=ouvert"
       selector:
         select:
-          options: ["Normal", "Inverted"]
+          options: ["Normal","Inversé"]
       default: "Normal"
 
-    # === TIMING ===
     door_open_delay:
-      name: Door Open Delay
-      description: Minimum time door must be open before action (DOOR sensors only)
+      name: Délai d'ouverture porte
+      description: Temps minimum d'ouverture continue avant action pour les capteurs de PORTE.
       selector:
         duration: {}
       default:
@@ -81,8 +84,8 @@ blueprint:
         seconds: 0
 
     min_closed_duration:
-      name: Minimum Closed Duration
-      description: Wait this delay before restoring heating (prevents rapid changes)
+      name: Durée minimale de fermeture
+      description: Attendre ce délai avant de restaurer le chauffage (évite les changements rapides).
       selector:
         duration: {}
       default:
@@ -90,41 +93,39 @@ blueprint:
         minutes: 2
         seconds: 0
 
-    # === HEATING MODES ===
     mode_when_open:
-      name: Mode When Open
-      description: Climate preset when window opened (immediate) or door opened (after delay)
+      name: Mode quand ouvert
+      description: Preset du climate quand une fenêtre est ouverte (immédiat) ou une porte est ouverte (après délai).
       selector:
         select:
-          options: ["comfort", "comfort-1", "comfort-2", "eco", "off"]
+          options: ["comfort","comfort-1","comfort-2","eco","off"]
       default: "off"
 
     mode_when_closed:
-      name: Mode When Closed
-      description: Climate preset when ALL sensors are closed (restoration mode)
+      name: Mode quand fermé
+      description: Preset du climate quand TOUS les capteurs sont fermés (mode de restauration).
       selector:
         select:
-          options: ["comfort", "comfort-1", "comfort-2", "eco", "off"]
+          options: ["comfort","comfort-1","comfort-2","eco","off"]
       default: "comfort"
 
     smart_restore:
-      name: Smart Restore
-      description: Remember and restore previous mode instead of using default mode
+      name: Restauration intelligente
+      description: Mémoriser et restaurer le mode précédent au lieu d'utiliser le mode par défaut.
       selector:
         boolean: {}
       default: false
 
-    # === NOTIFICATIONS & LOGGING ===
     room_name:
-      name: Room Name
-      description: Room name for notifications and logs (e.g. "Living Room", "Bedroom")
+      name: Nom de la pièce
+      description: Nom de la pièce pour les notifications et logs (ex. "Salon", "Chambre").
       selector:
         text: {}
-      default: "Room"
+      default: "Pièce"
 
     notify_devices:
-      name: Devices to Notify (optional)
-      description: Select mobile devices to receive notifications. Leave empty to disable.
+      name: Appareils à notifier (optionnel)
+      description: Sélectionner un ou plusieurs appareils mobiles pour recevoir les notifications. Laisser vide pour désactiver.
       selector:
         device:
           integration: mobile_app
@@ -132,311 +133,290 @@ blueprint:
       default: []
 
     log_entity:
-      name: Log Entity (optional)
-      description: input_text to log activity. Leave empty to disable.
+      name: Entité de log (optionnel)
+      description: input_text pour logger l'activité (créer un helper input_text si besoin). Laisser vide pour désactiver.
       selector:
         entity:
           domain: input_text
       default: ""
 
     window_status_sensor:
-      name: Window Status Sensor (optional)
-      description: input_text to display window status in dashboard. Leave empty to disable.
+      name: Capteur d'état fenêtres (optionnel)
+      description: input_text pour afficher l'état des fenêtres dans le dashboard. Laisser vide pour désactiver.
       selector:
         entity:
           domain: input_text
       default: ""
 
     door_status_sensor:
-      name: Door Status Sensor (optional)
-      description: input_text to display door status in dashboard. Leave empty to disable.
+      name: Capteur d'état portes (optionnel)
+      description: input_text pour afficher l'état des portes dans le dashboard. Laisser vide pour désactiver.
       selector:
         entity:
           domain: input_text
       default: ""
 
-# ===== VARIABLES =====
+# ===== Variables =====
 variables:
-  # Core configuration
-  status_raw: !input automation_status
-  status: "{{ status_raw }}"
+  status: !input automation_status
   module_type: !input module_type
-  heating_ent: !input heating_entity
-  
-  # Entity detection
-  climate: >
-    {% if module_type == 'NodOn' %}
-      {% if heating_ent.startswith('select.') %}
-        {{ heating_ent.replace('_pilot_wire_mode', '').replace('select.', 'climate.') }}
-      {% else %}
-        {{ heating_ent }}
-      {% endif %}
-    {% else %}
-      {{ heating_ent }}
-    {% endif %}
-  
-  pilot_select: >
-    {% if module_type == 'NodOn' %}
-      {% if heating_ent.startswith('select.') %}
-        {{ heating_ent }}
-      {% else %}
-        {{ heating_ent.replace('climate.', 'select.') ~ '_pilot_wire_mode' }}
-      {% endif %}
-    {% else %}
-      ''
-    {% endif %}
-  
-  # Sensors
-  windows: !input window_sensors
-  doors: !input door_sensors
-  all_sensors: "{{ windows + doors }}"
-  logic: !input sensor_logic
-  
-  # States based on logic
-  state_open: "{{ 'off' if logic == 'Inverted' else 'on' }}"
-  state_closed: "{{ 'on' if logic == 'Inverted' else 'off' }}"
-  
-  # Modes
+  climate: !input climate_entity
+  pilot_select: !input pilot_wire_select
   open_mode: !input mode_when_open
   closed_mode: !input mode_when_closed
+  windows: !input window_sensors
+  doors: !input door_sensors
+  door_delay: !input door_open_delay
+  min_close_delay: !input min_closed_duration
+  logic: !input sensor_logic
   smart_mode: !input smart_restore
-  
-  # Mode mapping for NodOn (comfort-1 → comfort_-1)
-  open_mode_mapped: >
-    {{ 'comfort_-1' if open_mode == 'comfort-1' else 
-       'comfort_-2' if open_mode == 'comfort-2' else open_mode }}
-  
-  closed_mode_mapped: >
-    {{ 'comfort_-1' if closed_mode == 'comfort-1' else 
-       'comfort_-2' if closed_mode == 'comfort-2' else closed_mode }}
-  
-  # Current preset for smart restore
-  current_preset: >
-    {% if module_type == 'NodOn' and pilot_select != '' %}
-      {{ states(pilot_select) }}
-    {% else %}
-      {{ state_attr(climate, 'preset_mode') }}
-    {% endif %}
-  
-  # Other settings
   room: !input room_name
   notify_devs: !input notify_devices
   log_ent: !input log_entity
   window_sensor: !input window_status_sensor
   door_sensor: !input door_status_sensor
+  all_sensors: >
+    {{ (windows | default([])) + (doors | default([])) }}
+  has_doors: >
+    {{ (doors | default([]) | length) > 0 }}
+  state_open: >
+    {{ 'off' if logic == 'Inversé' else 'on' }}
+  state_closed: >
+    {{ 'on' if logic == 'Inversé' else 'off' }}
+  current_preset: >
+    {% if module_type == 'Zigbee' and pilot_select != '' %}
+      {{ states(pilot_select) }}
+    {% else %}
+      {{ state_attr(climate, 'preset_mode') }}
+    {% endif %}
+  # Mapper les modes pour Zigbee (comfort-1 → comfort_-1)
+  open_mode_mapped: >
+    {% set mode = open_mode %}
+    {{ 'comfort_-1' if mode == 'comfort-1' else 
+       'comfort_-2' if mode == 'comfort-2' else mode }}
+  closed_mode_mapped: >
+    {% set mode = closed_mode %}
+    {{ 'comfort_-1' if mode == 'comfort-1' else 
+       'comfort_-2' if mode == 'comfort-2' else mode }}
 
-# ===== TRIGGERS =====
+# ===== Triggers =====
 trigger:
-  # Windows opened - immediate action
+  # Windows state change
   - platform: state
     entity_id: !input window_sensors
-    to: "{{ state_open }}"
-    id: window_opened
+    id: window_state_change
 
-  # Windows closed
-  - platform: state
-    entity_id: !input window_sensors
-    to: "{{ state_closed }}"
-    id: window_closed
-
-  # Doors opened - will wait delay
-  - platform: state
-    entity_id: !input door_sensors
-    to: "{{ state_open }}"
+  # Template trigger for doors opened (only fires if doors exist)
+  - platform: template
+    value_template: >
+      {% set door_list = doors | default([]) %}
+      {% set open_state = 'off' if logic == 'Inversé' else 'on' %}
+      {{ door_list | length > 0 and 
+         expand(door_list) | selectattr('state','eq', open_state) | list | length > 0 }}
     id: door_opened
 
-  # Doors closed
-  - platform: state
-    entity_id: !input door_sensors
-    to: "{{ state_closed }}"
+  # Template trigger for door closed (only fires if doors exist)
+  - platform: template
+    value_template: >
+      {% set door_list = doors | default([]) %}
+      {% set closed_state = 'on' if logic == 'Inversé' else 'off' %}
+      {{ door_list | length > 0 and 
+         expand(door_list) | selectattr('state','eq', closed_state) | list | length > 0 }}
     id: door_closed
 
-# ===== CONDITIONS =====
+# ===== Conditions =====
 condition:
-  # Must be Active
+  # Must be activated via status
   - condition: template
-    value_template: "{{ status == 'Active' }}"
-  
-  # Must have at least one sensor
+    value_template: "{{ status == 'Activé' }}"
+  # Require at least one window sensor selected
   - condition: template
-    value_template: "{{ (windows | length > 0) or (doors | length > 0) }}"
+    value_template: "{{ (windows | default([])) | length > 0 }}"
 
-# ===== ACTIONS =====
+# ===== Actions =====
 action:
   - choose:
-      # === WINDOW OPENED (immediate) ===
+      # === WINDOW STATE CHANGE ===
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'window_opened' }}"
+            value_template: "{{ trigger.id == 'window_state_change' }}"
         sequence:
-          # Update window status
-          - if:
-              - condition: template
-                value_template: "{{ window_sensor != '' }}"
-            then:
-              - service: input_text.set_value
-                target:
-                  entity_id: "{{ window_sensor }}"
-                data:
-                  value: >
-                    {{ expand(windows) | selectattr('state', 'eq', state_open) | list | length }} fenêtre(s) ouverte(s)
-          
-          # Turn off or set mode
           - choose:
-              # NodOn module
+              # WINDOW OPENED (immediate action)
               - conditions:
                   - condition: template
-                    value_template: "{{ module_type == 'NodOn' }}"
+                    value_template: "{{ trigger.to_state.state == state_open }}"
                 sequence:
-                  - service: select.select_option
-                    target:
-                      entity_id: "{{ pilot_select }}"
-                    data:
-                      option: "{{ open_mode_mapped }}"
-            # Standard module
-            default:
-              - if:
-                  - condition: template
-                    value_template: "{{ open_mode == 'off' }}"
-                then:
-                  - service: climate.turn_off
-                    target:
-                      entity_id: "{{ climate }}"
-                else:
-                  - service: climate.set_preset_mode
-                    target:
-                      entity_id: "{{ climate }}"
-                    data:
-                      preset_mode: "{{ open_mode }}"
-          
-          # Log
-          - if:
-              - condition: template
-                value_template: "{{ log_ent != '' }}"
-            then:
-              - service: input_text.set_value
-                target:
-                  entity_id: "{{ log_ent }}"
-                data:
-                  value: >
-                    {{ now().strftime('%H:%M') }} - {{ room }}: Fenêtre ouverte - Chauffage {{ 'ÉTEINT' if open_mode == 'off' else 'mode ' + open_mode }}
-          
-          # Notify
-          - if:
-              - condition: template
-                value_template: "{{ notify_devs | length > 0 }}"
-            then:
-              - repeat:
-                  for_each: "{{ notify_devs }}"
-                  sequence:
-                    - service: notify.mobile_app_{{ device_attr(repeat.item, 'name') | lower | replace(' ', '_') | replace('-', '_') }}
-                      data:
-                        message: "🪟 {{ room }}: Fenêtre ouverte - Chauffage {{ 'éteint' if open_mode == 'off' else 'réduit (' + open_mode + ')' }}"
-                        title: "Chauffage désactivé"
+                  # Update window status sensor
+                  - if:
+                      - condition: template
+                        value_template: "{{ window_sensor != '' }}"
+                    then:
+                      - service: input_text.set_value
+                        target:
+                          entity_id: "{{ window_sensor }}"
+                        data:
+                          value: >
+                            {{ expand(windows) | selectattr('state','eq', state_open) | list | length }} fenêtre(s) ouverte(s)
+                  
+                  # Apply OPEN mode according to module type
+                  - choose:
+                      # MODULE ZIGBEE
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ module_type == 'Zigbee' }}"
+                        sequence:
+                          - service: select.select_option
+                            target:
+                              entity_id: "{{ pilot_select }}"
+                            data:
+                              option: "{{ open_mode_mapped }}"
+                    # MODULE STANDARD
+                    default:
+                      - choose:
+                          - conditions:
+                              - condition: template
+                                value_template: "{{ open_mode == 'off' }}"
+                            sequence:
+                              - service: climate.turn_off
+                                target:
+                                  entity_id: !input climate_entity
+                        default:
+                          - service: climate.set_preset_mode
+                            target:
+                              entity_id: !input climate_entity
+                            data:
+                              preset_mode: "{{ open_mode }}"
+                  
+                  # Log action
+                  - if:
+                      - condition: template
+                        value_template: "{{ log_ent != '' }}"
+                    then:
+                      - service: input_text.set_value
+                        target:
+                          entity_id: "{{ log_ent }}"
+                        data:
+                          value: >
+                            {{ now().strftime('%H:%M') }} - {{ room }}: Fenêtre ouverte - Chauffage {{ 'ÉTEINT' if open_mode == 'off' else 'mode ' + open_mode }}
+                  
+                  # Send notification
+                  - if:
+                      - condition: template
+                        value_template: "{{ notify_devs | length > 0 }}"
+                    then:
+                      - repeat:
+                          for_each: "{{ notify_devs }}"
+                          sequence:
+                            - service: notify.mobile_app_{{ device_attr(repeat.item, 'name') | lower | replace(' ', '_') | replace('-', '_') }}
+                              data:
+                                message: >
+                                  🪟 {{ room }}: Fenêtre ouverte - Chauffage {{ 'éteint' if open_mode == 'off' else 'réduit (' + open_mode + ')' }}
+                                title: "Chauffage désactivé"
 
-      # === WINDOW CLOSED ===
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger.id == 'window_closed' }}"
-        sequence:
-          # Wait anti-bounce
-          - delay: !input min_closed_duration
-          
-          # Check ALL sensors closed
-          - condition: template
-            value_template: >
-              {{ expand(all_sensors) | selectattr('state', 'eq', state_open) | list | length == 0 }}
-          
-          # Update status
-          - if:
-              - condition: template
-                value_template: "{{ window_sensor != '' }}"
-            then:
-              - service: input_text.set_value
-                target:
-                  entity_id: "{{ window_sensor }}"
-                data:
-                  value: "Toutes les fenêtres fermées"
-          
-          # Determine restore mode
-          - variables:
-              restore_mode: >
-                {% if smart_mode and current_preset not in [none, 'none', 'unavailable'] %}
-                  {{ current_preset }}
-                {% else %}
-                  {{ closed_mode if module_type == 'Standard' else closed_mode_mapped }}
-                {% endif %}
-          
-          # Restore heating
-          - choose:
-              # NodOn
+              # WINDOW CLOSED - check if ALL sensors are closed
               - conditions:
                   - condition: template
-                    value_template: "{{ module_type == 'NodOn' }}"
+                    value_template: "{{ trigger.to_state.state == state_closed }}"
                 sequence:
-                  - service: select.select_option
-                    target:
-                      entity_id: "{{ pilot_select }}"
-                    data:
-                      option: "{{ restore_mode }}"
-            # Standard
-            default:
-              - if:
+                  # Wait minimum closed duration (anti-bounce)
+                  - delay: !input min_closed_duration
+                  # Verify ALL sensors are now closed
                   - condition: template
-                    value_template: "{{ restore_mode == 'off' }}"
-                then:
-                  - service: climate.turn_off
-                    target:
-                      entity_id: "{{ climate }}"
-                else:
-                  - service: climate.turn_on
-                    target:
-                      entity_id: "{{ climate }}"
-                  - service: climate.set_preset_mode
-                    target:
-                      entity_id: "{{ climate }}"
-                    data:
-                      preset_mode: "{{ restore_mode }}"
-          
-          # Log
-          - if:
-              - condition: template
-                value_template: "{{ log_ent != '' }}"
-            then:
-              - service: input_text.set_value
-                target:
-                  entity_id: "{{ log_ent }}"
-                data:
-                  value: >
-                    {{ now().strftime('%H:%M') }} - {{ room }}: Tout fermé - Chauffage {{ 'ALLUMÉ' if restore_mode != 'off' else 'ÉTEINT' }} ({{ restore_mode }})
-          
-          # Notify
-          - if:
-              - condition: template
-                value_template: "{{ notify_devs | length > 0 }}"
-            then:
-              - repeat:
-                  for_each: "{{ notify_devs }}"
-                  sequence:
-                    - service: notify.mobile_app_{{ device_attr(repeat.item, 'name') | lower | replace(' ', '_') | replace('-', '_') }}
-                      data:
-                        message: "✅ {{ room }}: Tout fermé - Chauffage {{ 'rallumé' if restore_mode != 'off' else 'éteint' }} ({{ restore_mode }})"
-                        title: "Chauffage restauré"
+                    value_template: >
+                      {{ expand(all_sensors) | selectattr('state','eq', state_open) | list | length == 0 }}
+                  
+                  # Update window status sensor
+                  - if:
+                      - condition: template
+                        value_template: "{{ window_sensor != '' }}"
+                    then:
+                      - service: input_text.set_value
+                        target:
+                          entity_id: "{{ window_sensor }}"
+                        data:
+                          value: "Toutes les fenêtres fermées"
+                  
+                  # Determine mode to restore
+                  - variables:
+                      restore_mode: >
+                        {% if smart_mode and current_preset != none and current_preset != 'none' %}
+                          {{ current_preset }}
+                        {% else %}
+                          {{ closed_mode if module_type == 'Standard' else closed_mode_mapped }}
+                        {% endif %}
+                  
+                  # Apply restore mode according to module type
+                  - choose:
+                      # MODULE ZIGBEE
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ module_type == 'Zigbee' }}"
+                        sequence:
+                          - service: select.select_option
+                            target:
+                              entity_id: "{{ pilot_select }}"
+                            data:
+                              option: "{{ restore_mode }}"
+                    # MODULE STANDARD
+                    default:
+                      - choose:
+                          - conditions:
+                              - condition: template
+                                value_template: "{{ restore_mode == 'off' }}"
+                            sequence:
+                              - service: climate.turn_off
+                                target:
+                                  entity_id: !input climate_entity
+                        default:
+                          - service: climate.turn_on
+                            target:
+                              entity_id: !input climate_entity
+                          - service: climate.set_preset_mode
+                            target:
+                              entity_id: !input climate_entity
+                            data:
+                              preset_mode: "{{ restore_mode }}"
+                  
+                  # Log action
+                  - if:
+                      - condition: template
+                        value_template: "{{ log_ent != '' }}"
+                    then:
+                      - service: input_text.set_value
+                        target:
+                          entity_id: "{{ log_ent }}"
+                        data:
+                          value: >
+                            {{ now().strftime('%H:%M') }} - {{ room }}: Tout fermé - Chauffage {{ 'ALLUMÉ' if restore_mode != 'off' else 'ÉTEINT' }} ({{ restore_mode }})
+                  
+                  # Send notification
+                  - if:
+                      - condition: template
+                        value_template: "{{ notify_devs | length > 0 }}"
+                    then:
+                      - repeat:
+                          for_each: "{{ notify_devs }}"
+                          sequence:
+                            - service: notify.mobile_app_{{ device_attr(repeat.item, 'name') | lower | replace(' ', '_') | replace('-', '_') }}
+                              data:
+                                message: >
+                                  ✅ {{ room }}: Tout fermé - Chauffage {{ 'rallumé' if restore_mode != 'off' else 'éteint' }} ({{ restore_mode }})
+                                title: "Chauffage restauré"
 
       # === DOOR OPENED (with delay) ===
       - conditions:
           - condition: template
             value_template: "{{ trigger.id == 'door_opened' }}"
         sequence:
-          # Wait delay
+          # Wait configured delay
           - delay: !input door_open_delay
-          
-          # Check still open
+          # Verify at least one door is still open
           - condition: template
             value_template: >
-              {{ expand(doors) | selectattr('state', 'eq', state_open) | list | length > 0 }}
+              {{ expand(doors) | selectattr('state','eq', state_open) | list | length > 0 }}
           
-          # Update status
+          # Update door status sensor
           - if:
               - condition: template
                 value_template: "{{ door_sensor != '' }}"
@@ -446,37 +426,38 @@ action:
                   entity_id: "{{ door_sensor }}"
                 data:
                   value: >
-                    {{ expand(doors) | selectattr('state', 'eq', state_open) | list | length }} porte(s) ouverte(s)
+                    {{ expand(doors) | selectattr('state','eq', state_open) | list | length }} porte(s) ouverte(s)
           
-          # Turn off or set mode
+          # Apply OPEN mode according to module type
           - choose:
-              # NodOn
+              # MODULE ZIGBEE
               - conditions:
                   - condition: template
-                    value_template: "{{ module_type == 'NodOn' }}"
+                    value_template: "{{ module_type == 'Zigbee' }}"
                 sequence:
                   - service: select.select_option
                     target:
                       entity_id: "{{ pilot_select }}"
                     data:
                       option: "{{ open_mode_mapped }}"
-            # Standard
+            # MODULE STANDARD
             default:
-              - if:
-                  - condition: template
-                    value_template: "{{ open_mode == 'off' }}"
-                then:
-                  - service: climate.turn_off
-                    target:
-                      entity_id: "{{ climate }}"
-                else:
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ open_mode == 'off' }}"
+                    sequence:
+                      - service: climate.turn_off
+                        target:
+                          entity_id: !input climate_entity
+                default:
                   - service: climate.set_preset_mode
                     target:
-                      entity_id: "{{ climate }}"
+                      entity_id: !input climate_entity
                     data:
                       preset_mode: "{{ open_mode }}"
           
-          # Log
+          # Log action
           - if:
               - condition: template
                 value_template: "{{ log_ent != '' }}"
@@ -486,9 +467,9 @@ action:
                   entity_id: "{{ log_ent }}"
                 data:
                   value: >
-                    {{ now().strftime('%H:%M') }} - {{ room }}: Porte ouverte - Chauffage {{ 'ÉTEINT' if open_mode == 'off' else 'mode ' + open_mode }}
+                    {{ now().strftime('%H:%M') }} - {{ room }}: Porte ouverte (>{{ (door_delay.minutes | default(4)) }}min) - Chauffage {{ 'ÉTEINT' if open_mode == 'off' else 'mode ' + open_mode }}
           
-          # Notify
+          # Send notification
           - if:
               - condition: template
                 value_template: "{{ notify_devs | length > 0 }}"
@@ -498,7 +479,8 @@ action:
                   sequence:
                     - service: notify.mobile_app_{{ device_attr(repeat.item, 'name') | lower | replace(' ', '_') | replace('-', '_') }}
                       data:
-                        message: "🚪 {{ room }}: Porte ouverte - Chauffage {{ 'éteint' if open_mode == 'off' else 'réduit (' + open_mode + ')' }}"
+                        message: >
+                          🚪 {{ room }}: Porte ouverte - Chauffage {{ 'éteint' if open_mode == 'off' else 'réduit (' + open_mode + ')' }}
                         title: "Chauffage désactivé"
 
       # === DOOR CLOSED ===
@@ -506,15 +488,14 @@ action:
           - condition: template
             value_template: "{{ trigger.id == 'door_closed' }}"
         sequence:
-          # Wait anti-bounce
+          # Wait minimum closed duration
           - delay: !input min_closed_duration
-          
-          # Check ALL sensors closed
+          # Verify ALL sensors are now closed
           - condition: template
             value_template: >
-              {{ expand(all_sensors) | selectattr('state', 'eq', state_open) | list | length == 0 }}
+              {{ expand(all_sensors) | selectattr('state','eq', state_open) | list | length == 0 }}
           
-          # Update status
+          # Update door status sensor
           - if:
               - condition: template
                 value_template: "{{ door_sensor != '' }}"
@@ -525,47 +506,48 @@ action:
                 data:
                   value: "Toutes les portes fermées"
           
-          # Determine restore mode
+          # Determine mode to restore
           - variables:
               restore_mode: >
-                {% if smart_mode and current_preset not in [none, 'none', 'unavailable'] %}
+                {% if smart_mode and current_preset != none and current_preset != 'none' %}
                   {{ current_preset }}
                 {% else %}
                   {{ closed_mode if module_type == 'Standard' else closed_mode_mapped }}
                 {% endif %}
           
-          # Restore heating
+          # Apply restore mode according to module type
           - choose:
-              # NodOn
+              # MODULE ZIGBEE
               - conditions:
                   - condition: template
-                    value_template: "{{ module_type == 'NodOn' }}"
+                    value_template: "{{ module_type == 'Zigbee' }}"
                 sequence:
                   - service: select.select_option
                     target:
                       entity_id: "{{ pilot_select }}"
                     data:
                       option: "{{ restore_mode }}"
-            # Standard
+            # MODULE STANDARD
             default:
-              - if:
-                  - condition: template
-                    value_template: "{{ restore_mode == 'off' }}"
-                then:
-                  - service: climate.turn_off
-                    target:
-                      entity_id: "{{ climate }}"
-                else:
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ restore_mode == 'off' }}"
+                    sequence:
+                      - service: climate.turn_off
+                        target:
+                          entity_id: !input climate_entity
+                default:
                   - service: climate.turn_on
                     target:
-                      entity_id: "{{ climate }}"
+                      entity_id: !input climate_entity
                   - service: climate.set_preset_mode
                     target:
-                      entity_id: "{{ climate }}"
+                      entity_id: !input climate_entity
                     data:
                       preset_mode: "{{ restore_mode }}"
           
-          # Log
+          # Log action
           - if:
               - condition: template
                 value_template: "{{ log_ent != '' }}"
@@ -577,7 +559,7 @@ action:
                   value: >
                     {{ now().strftime('%H:%M') }} - {{ room }}: Tout fermé - Chauffage {{ 'ALLUMÉ' if restore_mode != 'off' else 'ÉTEINT' }} ({{ restore_mode }})
           
-          # Notify
+          # Send notification
           - if:
               - condition: template
                 value_template: "{{ notify_devs | length > 0 }}"
@@ -587,7 +569,9 @@ action:
                   sequence:
                     - service: notify.mobile_app_{{ device_attr(repeat.item, 'name') | lower | replace(' ', '_') | replace('-', '_') }}
                       data:
-                        message: "✅ {{ room }}: Tout fermé - Chauffage {{ 'rallumé' if restore_mode != 'off' else 'éteint' }} ({{ restore_mode }})"
+                        message: >
+                          ✅ {{ room }}: Tout fermé - Chauffage {{ 'rallumé' if restore_mode != 'off' else 'éteint' }} ({{ restore_mode }})
                         title: "Chauffage restauré"
+    default: []
 
-mode: restart
+mode: single
