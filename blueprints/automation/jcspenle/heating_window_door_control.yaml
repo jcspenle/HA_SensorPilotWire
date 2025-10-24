@@ -1,11 +1,12 @@
 blueprint:
-  name: Heating Control - Window/Door Open Detection v1.1
-  source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control.yaml
+  name: Heating Control - Window/Door Open Detection v1.2x Universal
+  source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control_universal.yaml
   description: >
-    Automated heating control with window/door sensors.
+    Automated heating control with window/door sensors - Compatible Z-Wave & NodOn modules.
     - Windows: immediate action; Doors: action after a configurable delay (default 4 minutes).
     - Configurable modes when open/closed (comfort, comfort-1, comfort-2, eco, off).
     - Automation status selector (Activated / Bypass).
+    - Module type selector: Z-Wave (climate) or NodOn (select fil pilote).
     - Window sensors required; door sensors optional.
     - Support for inverted sensor logic (on=closed / off=open).
     - Notifications in French when heating state changes.
@@ -23,11 +24,19 @@ blueprint:
           options: ["Activé","Bypass"]
       default: "Activé"
 
-    climate_entity:
-      name: Entité Climate (Radiateur)
+    module_type:
+      name: Type de module chauffage
+      description: "Z-Wave: utilise climate entity | NodOn: utilise select fil pilote entity"
       selector:
-        entity:
-          domain: climate
+        select:
+          options: ["Z-Wave", "NodOn"]
+      default: "Z-Wave"
+
+    heating_entity:
+      name: Entité de chauffage
+      description: "Pour Z-Wave: climate.xxx | Pour NodOn: select.xxx_pilot_wire_mode"
+      selector:
+        entity: {}
 
     window_sensors:
       name: Capteurs de fenêtres (requis)
@@ -142,7 +151,8 @@ blueprint:
 # ===== Variables =====
 variables:
   status: !input automation_status
-  climate: !input climate_entity
+  module_type: !input module_type
+  heating_entity: !input heating_entity
   open_mode: !input mode_when_open
   closed_mode: !input mode_when_closed
   windows: !input window_sensors
@@ -165,7 +175,20 @@ variables:
   state_closed: >
     {{ 'on' if logic == 'Inversé' else 'off' }}
   current_preset: >
-    {{ state_attr(climate, 'preset_mode') }}
+    {% if module_type == 'NodOn' %}
+      {{ states(heating_entity) }}
+    {% else %}
+      {{ state_attr(heating_entity, 'preset_mode') }}
+    {% endif %}
+  # Mapper les modes pour NodOn (comfort-1 → comfort_-1)
+  open_mode_mapped: >
+    {% set mode = open_mode %}
+    {{ 'comfort_-1' if mode == 'comfort-1' else 
+       'comfort_-2' if mode == 'comfort-2' else mode }}
+  closed_mode_mapped: >
+    {% set mode = closed_mode %}
+    {{ 'comfort_-1' if mode == 'comfort-1' else 
+       'comfort_-2' if mode == 'comfort-2' else mode }}
 
 # ===== Triggers =====
 trigger:
@@ -210,10 +233,11 @@ action:
             value_template: "{{ trigger.id == 'window_state_change' }}"
         sequence:
           - choose:
-              # WINDOW OPENED (immediate action)
+              # At least one window opened → Apply OPEN mode
               - conditions:
                   - condition: template
-                    value_template: "{{ trigger.to_state.state == state_open }}"
+                    value_template: >
+                      {{ expand(windows) | selectattr('state','eq', state_open) | list | length > 0 }}
                 sequence:
                   # Update window status sensor
                   - if:
@@ -227,21 +251,34 @@ action:
                           value: >
                             {{ expand(windows) | selectattr('state','eq', state_open) | list | length }} fenêtre(s) ouverte(s)
                   
-                  # Apply OPEN mode immediately
+                  # Apply OPEN mode according to module type
                   - choose:
+                      # MODULE NODON
                       - conditions:
                           - condition: template
-                            value_template: "{{ open_mode == 'off' }}"
+                            value_template: "{{ module_type == 'NodOn' }}"
                         sequence:
-                          - service: climate.turn_off
+                          - service: select.select_option
                             target:
-                              entity_id: !input climate_entity
+                              entity_id: "{{ heating_entity }}"
+                            data:
+                              option: "{{ open_mode_mapped }}"
+                    # MODULE Z-WAVE
                     default:
-                      - service: climate.set_preset_mode
-                        target:
-                          entity_id: !input climate_entity
-                        data:
-                          preset_mode: "{{ open_mode }}"
+                      - choose:
+                          - conditions:
+                              - condition: template
+                                value_template: "{{ open_mode == 'off' }}"
+                            sequence:
+                              - service: climate.turn_off
+                                target:
+                                  entity_id: "{{ heating_entity }}"
+                        default:
+                          - service: climate.set_preset_mode
+                            target:
+                              entity_id: "{{ heating_entity }}"
+                            data:
+                              preset_mode: "{{ open_mode }}"
                   
                   # Log action
                   - if:
@@ -269,14 +306,19 @@ action:
                                   🪟 {{ room }}: Fenêtre ouverte - Chauffage {{ 'éteint' if open_mode == 'off' else 'réduit (' + open_mode + ')' }}
                                 title: "Chauffage désactivé"
 
-              # WINDOW CLOSED - check if ALL sensors are closed
+              # All windows closed
               - conditions:
                   - condition: template
-                    value_template: "{{ trigger.to_state.state == state_closed }}"
+                    value_template: >
+                      {{ expand(windows) | selectattr('state','eq', state_open) | list | length == 0 }}
                 sequence:
-                  # Wait minimum closed duration (anti-bounce)
+                  # Wait minimum closed duration
                   - delay: !input min_closed_duration
-                  # Verify ALL sensors are now closed
+                  # Verify windows are still closed
+                  - condition: template
+                    value_template: >
+                      {{ expand(windows) | selectattr('state','eq', state_open) | list | length == 0 }}
+                  # Verify ALL sensors (windows + doors) are closed
                   - condition: template
                     value_template: >
                       {{ expand(all_sensors) | selectattr('state','eq', state_open) | list | length == 0 }}
@@ -295,30 +337,43 @@ action:
                   # Determine mode to restore
                   - variables:
                       restore_mode: >
-                        {% if smart_mode and current_preset != none %}
+                        {% if smart_mode and current_preset != none and current_preset != 'none' %}
                           {{ current_preset }}
                         {% else %}
-                          {{ closed_mode }}
+                          {{ closed_mode if module_type == 'Z-Wave' else closed_mode_mapped }}
                         {% endif %}
                   
-                  # Apply restore mode
+                  # Apply restore mode according to module type
                   - choose:
+                      # MODULE NODON
                       - conditions:
                           - condition: template
-                            value_template: "{{ restore_mode == 'off' }}"
+                            value_template: "{{ module_type == 'NodOn' }}"
                         sequence:
-                          - service: climate.turn_off
+                          - service: select.select_option
                             target:
-                              entity_id: !input climate_entity
+                              entity_id: "{{ heating_entity }}"
+                            data:
+                              option: "{{ restore_mode }}"
+                    # MODULE Z-WAVE
                     default:
-                      - service: climate.turn_on
-                        target:
-                          entity_id: !input climate_entity
-                      - service: climate.set_preset_mode
-                        target:
-                          entity_id: !input climate_entity
-                        data:
-                          preset_mode: "{{ restore_mode }}"
+                      - choose:
+                          - conditions:
+                              - condition: template
+                                value_template: "{{ restore_mode == 'off' }}"
+                            sequence:
+                              - service: climate.turn_off
+                                target:
+                                  entity_id: "{{ heating_entity }}"
+                        default:
+                          - service: climate.turn_on
+                            target:
+                              entity_id: "{{ heating_entity }}"
+                          - service: climate.set_preset_mode
+                            target:
+                              entity_id: "{{ heating_entity }}"
+                            data:
+                              preset_mode: "{{ restore_mode }}"
                   
                   # Log action
                   - if:
@@ -370,21 +425,34 @@ action:
                   value: >
                     {{ expand(doors) | selectattr('state','eq', state_open) | list | length }} porte(s) ouverte(s)
           
-          # Apply OPEN mode
+          # Apply OPEN mode according to module type
           - choose:
+              # MODULE NODON
               - conditions:
                   - condition: template
-                    value_template: "{{ open_mode == 'off' }}"
+                    value_template: "{{ module_type == 'NodOn' }}"
                 sequence:
-                  - service: climate.turn_off
+                  - service: select.select_option
                     target:
-                      entity_id: !input climate_entity
+                      entity_id: "{{ heating_entity }}"
+                    data:
+                      option: "{{ open_mode_mapped }}"
+            # MODULE Z-WAVE
             default:
-              - service: climate.set_preset_mode
-                target:
-                  entity_id: !input climate_entity
-                data:
-                  preset_mode: "{{ open_mode }}"
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ open_mode == 'off' }}"
+                    sequence:
+                      - service: climate.turn_off
+                        target:
+                          entity_id: "{{ heating_entity }}"
+                default:
+                  - service: climate.set_preset_mode
+                    target:
+                      entity_id: "{{ heating_entity }}"
+                    data:
+                      preset_mode: "{{ open_mode }}"
           
           # Log action
           - if:
@@ -438,30 +506,43 @@ action:
           # Determine mode to restore
           - variables:
               restore_mode: >
-                {% if smart_mode and current_preset != none %}
+                {% if smart_mode and current_preset != none and current_preset != 'none' %}
                   {{ current_preset }}
                 {% else %}
-                  {{ closed_mode }}
+                  {{ closed_mode if module_type == 'Z-Wave' else closed_mode_mapped }}
                 {% endif %}
           
-          # Apply restore mode
+          # Apply restore mode according to module type
           - choose:
+              # MODULE NODON
               - conditions:
                   - condition: template
-                    value_template: "{{ restore_mode == 'off' }}"
+                    value_template: "{{ module_type == 'NodOn' }}"
                 sequence:
-                  - service: climate.turn_off
+                  - service: select.select_option
                     target:
-                      entity_id: !input climate_entity
+                      entity_id: "{{ heating_entity }}"
+                    data:
+                      option: "{{ restore_mode }}"
+            # MODULE Z-WAVE
             default:
-              - service: climate.turn_on
-                target:
-                  entity_id: !input climate_entity
-              - service: climate.set_preset_mode
-                target:
-                  entity_id: !input climate_entity
-                data:
-                  preset_mode: "{{ restore_mode }}"
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ restore_mode == 'off' }}"
+                    sequence:
+                      - service: climate.turn_off
+                        target:
+                          entity_id: "{{ heating_entity }}"
+                default:
+                  - service: climate.turn_on
+                    target:
+                      entity_id: "{{ heating_entity }}"
+                  - service: climate.set_preset_mode
+                    target:
+                      entity_id: "{{ heating_entity }}"
+                    data:
+                      preset_mode: "{{ restore_mode }}"
           
           # Log action
           - if:
