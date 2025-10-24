@@ -1,5 +1,5 @@
 blueprint:
-  name: Heating Control - Window/Door Open Detection v1.3xx Universal
+  name: Heating Control - Window/Door Open Detection v1.3.1 Universal
   source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control_universal.yaml
   description: >
     Automated heating control with window/door sensors - Compatible Z-Wave & NodOn modules.
@@ -18,11 +18,11 @@ blueprint:
   input:
     automation_status:
       name: Statut de l'automation
-      description: Choisir 'Activé' pour activer la logique ou 'Bypass' pour la désactiver.
+      description: Choisir 'Active' pour activer la logique ou 'Bypass' pour la désactiver.
       selector:
         select:
-          options: ["Activé","Bypass"]
-      default: "Activé"
+          options: ["Active","Bypass"]
+      default: "Active"
 
     module_type:
       name: Type de module chauffage
@@ -70,10 +70,10 @@ blueprint:
 
     sensor_logic:
       name: Logique des capteurs
-      description: "Normal: on=ouvert, off=fermé | Inversé: on=fermé, off=ouvert"
+      description: "Normal: on=ouvert, off=fermé | Inverse: on=fermé, off=ouvert"
       selector:
         select:
-          options: ["Normal","Inversé"]
+          options: ["Normal","Inverse"]
       default: "Normal"
 
     door_open_delay:
@@ -187,9 +187,9 @@ variables:
   has_doors: >
     {{ (doors | default([]) | length) > 0 }}
   state_open: >
-    {{ 'off' if logic == 'Inversé' else 'on' }}
+    {{ 'off' if logic == 'Inverse' else 'on' }}
   state_closed: >
-    {{ 'on' if logic == 'Inversé' else 'off' }}
+    {{ 'on' if logic == 'Inverse' else 'off' }}
   current_preset: >
     {% if module_type == 'NodOn' %}
       {{ states(heating_entity) }}
@@ -208,22 +208,16 @@ variables:
 
 # ===== Triggers =====
 trigger:
-  # Windows state change (only if windows exist)
-  - platform: template
-    value_template: >
-      {% set window_list = windows | default([]) %}
-      {% if window_list | length == 0 %}
-        false
-      {% else %}
-        {{ expand(window_list) | map(attribute='state') | list | length > 0 }}
-      {% endif %}
+  # Windows state change
+  - platform: state
+    entity_id: !input window_sensors
     id: window_state_change
 
   # Template trigger for doors opened (only fires if doors exist)
   - platform: template
     value_template: >
       {% set door_list = doors | default([]) %}
-      {% set open_state = 'off' if logic == 'Inversé' else 'on' %}
+      {% set open_state = 'off' if logic == 'Inverse' else 'on' %}
       {{ door_list | length > 0 and 
          expand(door_list) | selectattr('state','eq', open_state) | list | length > 0 }}
     id: door_opened
@@ -232,7 +226,7 @@ trigger:
   - platform: template
     value_template: >
       {% set door_list = doors | default([]) %}
-      {% set closed_state = 'on' if logic == 'Inversé' else 'off' %}
+      {% set closed_state = 'on' if logic == 'Inverse' else 'off' %}
       {{ door_list | length > 0 and 
          expand(door_list) | selectattr('state','eq', closed_state) | list | length > 0 }}
     id: door_closed
@@ -241,7 +235,7 @@ trigger:
 condition:
   # Must be activated via status
   - condition: template
-    value_template: "{{ status == 'Activé' }}"
+    value_template: "{{ status == 'Active' }}"
   # Require at least one sensor (window OR door)
   - condition: template
     value_template: "{{ (windows | default([])) | length > 0 or (doors | default([])) | length > 0 }}"
