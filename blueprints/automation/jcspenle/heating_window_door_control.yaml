@@ -1,5 +1,5 @@
 blueprint:
-  name: Heating Control - Window/Door Open Detection v1.3x Universal
+  name: Heating Control - Window/Door Open Detection v1.3xx Universal
   source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control_universal.yaml
   description: >
     Automated heating control with window/door sensors - Compatible Z-Wave & NodOn modules.
