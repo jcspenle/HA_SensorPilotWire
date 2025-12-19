@@ -1,30 +1,23 @@
 blueprint:
-  name: Heating Control - Window/Door/Skylight Detection v1.4.0 Universal FIXED
+  name: Heating Control - Window/Door/Skylight Detection v1.3.1 Universal
   source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control_universal.yaml
   description: >
-    ⚠️ VERSION 2.0.1 - BREAKING CHANGES FIXED - Les fenêtres ont maintenant un délai par défaut de 45s.
-    
     Automated heating control with window/door/skylight sensors - Compatible Z-Wave & NodOn modules.
     
     **3 types de capteurs avec timers différents :**
-    - Velux/Vasistas: timer configurable (défaut 0s = immédiat) pour aération volontaire
-    - Fenêtres: timer configurable (défaut 45s) pour éviter réactions au chat/volets
-    - Portes: timer configurable (défaut 4min) pour ouvertures prolongées
+    - Velux/Vasistas: timer configurable (défaut 0s = immédiat)
+    - Fenêtres: timer configurable (défaut 45s)
+    - Portes: timer configurable (défaut 4min)
     
     **Fonctionnalités :**
     - Configurable modes when open/closed (comfort, comfort-1, comfort-2, eco, off)
     - Automation status selector (Activated / Bypass)
     - Module type selector: Z-Wave (climate) or NodOn (select fil pilote)
-    - At least one sensor type required (skylight OR window OR door)
     - Support for inverted sensor logic (on=closed / off=open)
     - Notifications in French when heating state changes
     - Activity logging with room names
     - Smart mode: restores previous preset when closing
     - Dashboard sensors for each sensor type status
-    
-    **⚠️ MIGRATION depuis v1.x :**
-    Les capteurs dans "window_sensors" ont maintenant un délai de 45s par défaut.
-    Si vous voulez le comportement immédiat précédent, mettez le délai à 0s ou utilisez "skylight_sensors".
   domain: automation
 
   input:
