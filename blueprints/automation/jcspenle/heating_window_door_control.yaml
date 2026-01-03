@@ -84,7 +84,7 @@ blueprint:
 
     window_sensors:
       name: Capteurs de fenêtres (optionnel)
-      description: ⚠️ v2.0 - Sélectionner les capteurs de fenêtre (action après délai pour éviter chat/volets). Laisser vide si aucun.
+      description: Sélectionner les capteurs de fenêtre (action après délai pour éviter chat/volets). Laisser vide si aucun.
       selector:
         entity:
           domain: binary_sensor
