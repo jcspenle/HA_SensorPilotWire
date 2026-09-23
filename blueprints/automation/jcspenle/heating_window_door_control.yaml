@@ -1,9 +1,17 @@
 blueprint:
-  name: Heating Control - Window/Door/Skylight Detection v1.5.1
-  source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control_universal.yaml
+  name: Heating Control - Window/Door/Skylight Detection v1.5.2
+  source_url: https://raw.githubusercontent.com/jcspenle/HA_SensorPilotWire/main/blueprints/automation/jcspenle/heating_window_door_control.yaml
   description: >
     Automated heating control with window/door/skylight sensors - Compatible Z-Wave & NodOn modules.
     
+    **Version 1.5.2 - Événements perdus pendant les délais**
+    - ✅ FIX: mode parallel (au lieu de single) : un changement pendant un délai n'est
+      plus jeté (« Already running »). Ex. fermer puis rouvrir en moins d'1 min laissait
+      le chauffage allumé fenêtre ouverte. Chaque exécution revérifie l'état réel après
+      son délai : la période de grâce (volets, aération courte) est conservée.
+    - ✅ FIX: triggers ignorés depuis/vers unavailable/unknown (plus de rafale au démarrage)
+    - ✅ FIX: source_url pointait vers un fichier inexistant (_universal)
+
     **Version 1.5.1 - FIX CRITIQUE : Triggers conditionnels**
     - ❌ RETIRÉ: enabled: avec templates dans triggers (cause de non-déclenchement)
     - ✅ FIX: Conditions ajoutées au début de chaque séquence
@@ -255,21 +263,27 @@ variables:
     {{ 'comfort_-1' if mode == 'comfort-1' else 
        'comfort_-2' if mode == 'comfort-2' else mode }}
 
-# ===== Triggers v1.5.1: SANS enabled: =====
+# ===== Triggers v1.5.2: SANS enabled:, sans les passages par unavailable/unknown =====
 trigger:
   # SKYLIGHTS - Trigger toujours, condition filtre ensuite
   - platform: state
     entity_id: !input skylight_sensors
+    not_from: [unavailable, unknown]
+    not_to: [unavailable, unknown]
     id: skylight_state_change
 
   # WINDOWS - Trigger toujours, condition filtre ensuite
   - platform: state
     entity_id: !input window_sensors
+    not_from: [unavailable, unknown]
+    not_to: [unavailable, unknown]
     id: window_state_change
 
   # DOORS - Trigger toujours, condition filtre ensuite
   - platform: state
     entity_id: !input door_sensors
+    not_from: [unavailable, unknown]
+    not_to: [unavailable, unknown]
     id: door_state_change
 
 # ===== Conditions =====
@@ -935,4 +949,7 @@ action:
                                 title: "Chauffage restauré"
     default: []
 
-mode: single
+# parallel (v1.5.2) : chaque événement suit son propre délai puis revérifie l'état réel
+mode: parallel
+max: 20
+max_exceeded: silent
